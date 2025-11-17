@@ -14,11 +14,11 @@ except ImportError:
     exit()
 
 # --- 설정값 ---
-CAMERA_IP = "10.0.131.104" # URL이 아닌 IP만
+CAMERA_IP = "10.0.131.105" # URL이 아닌 IP만
 CAMERA_URL = f"http://{CAMERA_IP}/setup"
 USERNAME = "admin"
-PASSWORD = "qwerty"
-HTTP_AUTH = (USERNAME, PASSWORD) # API 요청용 인증 튜플
+PASSWORD = "qwerty0-" 
+# HTTP_AUTH 변수는 더 이상 필요 없습니다.
 
 EXPORT_FILE = "registry_test.dat" # 테스트용 파일 이름
 TEST_NOTE_VALUE = "AUTOMATION_TEST_VALUE_12345" # 검증용 특수 문자열
@@ -61,8 +61,8 @@ def run_full_test():
             if not ui_set_note(page, CONTAMINATE_VALUE):
                 raise Exception("'설명' 값 오염(UI) 실패")
             
-            # API로 오염되었는지 확인
-            note_check = api_get_note(CAMERA_IP, HTTP_AUTH)
+            # (CAMERA_IP, HTTP_AUTH) 대신 (page, CAMERA_IP)를 전달
+            note_check = api_get_note(page, CAMERA_IP) 
             if note_check != CONTAMINATE_VALUE:
                  raise Exception(f"값 오염 실패! (현재 값: {note_check})")
             print(f"✅ [메인] 값 오염 완료 (현재 'note' = {CONTAMINATE_VALUE})")
@@ -76,12 +76,9 @@ def run_full_test():
             
             # 5. (최종 검증)
             print("\n[메인] 5. API로 최종 'note' 값을 검증합니다...")
-            # 재부팅되었으므로 페이지를 새로고침/재방문해야 세션이 복구됨
-            print("[메인] 재부팅 후 페이지 재접속...")
-            page.goto(CAMERA_AURL) 
-            page.wait_for_selector("text=시스템", timeout=15000) # 재부팅 후 로딩 시간
             
-            final_note_value = api_get_note(CAMERA_IP, HTTP_AUTH)
+            final_note_value = api_get_note(page, CAMERA_IP)
+            # ----------------------------------------------------
             
             if final_note_value == TEST_NOTE_VALUE:
                 print("\n===============================================")
@@ -105,11 +102,5 @@ def run_full_test():
             browser.close()
 
 if __name__ == "__main__":
-    # requests 라이브러리 설치 확인
-    try:
-        import requests
-    except ImportError:
-        print(" 'requests' 라이브러리가 필요합니다. 'pip install requests'를 실행하세요.")
-        exit()
-        
+    # 'requests' 라이브러리가 더 이상 필요 없으므로 확인 로직 제거
     run_full_test()
