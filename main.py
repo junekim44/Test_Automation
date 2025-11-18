@@ -1,17 +1,16 @@
 import time
 from playwright.sync_api import sync_playwright
 
-# 1. 👈 'system_tests.py' 파일에서 실행할 테스트 케이스 함수를 import
+# 1. 실행할 테스트 케이스가 있는 파일들을 import
 try:
     from system_tests import run_setup_roundtrip_test
-    # ⭐️ 나중에 date_tests.py 만들면 여기에 추가:
-    # from date_tests import run_ntp_server_test 
+    from language_test import run_all_languages_test
 except ImportError:
-    print("오류: 'system_tests.py' 또는 'date_tests.py' 파일을 찾을 수 없습니다.")
+    print("오류: 'common_actions.py', 'system_tests.py', 'language_test.py' 파일이 같은 폴더에 있는지 확인하세요.")
     exit()
 
 # --- 전역 설정값 ---
-CAMERA_IP = "10.0.131.108" 
+CAMERA_IP = "10.0.131.105" 
 CAMERA_URL = f"http://{CAMERA_IP}/setup"
 USERNAME = "admin"
 PASSWORD = "qwerty0-" 
@@ -36,29 +35,32 @@ def main():
             # 0. 공통 준비 단계: 로그인
             print("[메인] 로그인 시도...")
             page.goto(CAMERA_URL)
-            page.wait_for_selector("text=시스템", timeout=10000)
-            print("✅ [메인] 로그인 성공!")
+            print("[메인] 로그인 성공 확인 중 (메뉴 ID 대기)...")
+            page.wait_for_selector("#Page200_id", timeout=10000)
             
             # ----------------------------------------------------
-            # ⭐️ 테스트 케이스 호출 ⭐️
+            # ⭐️ 테스트 케이스 실행 (원하는 테스트의 주석(#)을 해제)
             # ----------------------------------------------------
             
-            # 1. '시스템' 메뉴 테스트 실행
-            success, message = run_setup_roundtrip_test(page, CAMERA_IP)
-            if not success:
-                raise Exception(f"시스템 테스트 실패: {message}")
-            print(f"\n🎉 [메인] {message}")
-            
-            # 2. '날짜/시간' 메뉴 테스트 실행 (예시)
-            # print("\n--- [TC 2] 날짜/시간 테스트 시작 ---")
-            # success, msg = run_ntp_server_test(page, CAMERA_IP) 
+            # --- [테스트 1: 설정 내보내기/불러오기] ---
+            # print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
+            # success, message = run_setup_roundtrip_test(page, CAMERA_IP)
             # if not success:
-            #     raise Exception(f"날짜/시간 테스트 실패: {msg}")
+            #     raise Exception(f"시스템 테스트 실패: {message}")
+            # print(f"\n🎉 [메인] {message}")
+            
+
+            # --- [테스트 2: 전체 언어 변경] ---
+            print("\n--- [메인] '언어' 테스트 케이스 실행 ---")
+            success, message = run_all_languages_test(page, CAMERA_IP)
+            if not success:
+                raise Exception(f"언어 테스트 실패: {message}")
+            print(f"\n🎉 [메인] {message}")
 
             # ----------------------------------------------------
 
             print("\n===============================================")
-            print("✅ 모든 테스트 케이스가 성공적으로 완료되었습니다.")
+            print("✅ 선택된 테스트 케이스가 성공적으로 완료되었습니다.")
             print("===============================================")
             time.sleep(5)
 

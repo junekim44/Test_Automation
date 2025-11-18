@@ -2,6 +2,8 @@ import os
 import time
 from playwright.sync_api import Page
 
+VISIBLE_DIALOG_SELECTOR = 'div.ui-dialog[style*="display: block"]'
+
 # -----------------------------------------------------------
 # ⚙️ [헬퍼 1] 설정 내보내기
 # -----------------------------------------------------------
@@ -54,8 +56,9 @@ def import_settings_and_reboot(page: Page, file_path="registry.dat"):
     """
     
     FILE_INPUT_SELECTOR = "#importFileToRead" 
-    IMPORT_BUTTON_SELECTOR = "#reg-import" 
+    IMPORT_BUTTON_SELECTOR = "#reg-import" # ID 오타 수정 (reg-imprt -> reg-import)
     
+    # os.path.abspath() : 파일의 '절대 경로'를 가져옵니다.
     absolute_file_path = os.path.abspath(file_path)
     print(f"파일 절대 경로: {absolute_file_path}")
     
@@ -67,18 +70,24 @@ def import_settings_and_reboot(page: Page, file_path="registry.dat"):
         page.locator("#Page201_id").click()
         page.wait_for_timeout(500)
 
+        # 1. "파일 선택창"이 열릴 것을 미리 대기합니다.
         print(f"[액션] '파일 선택창' 열기 이벤트 대기...")
         with page.expect_file_chooser() as fc_info:
+            
+            # 2. '설정 불러오기' 버튼을 클릭 (이때 파일 선택창이 열림)
             print(f"[액션] '{IMPORT_BUTTON_SELECTOR}' 버튼 클릭 (파일창 열기)...")
             page.locator(IMPORT_BUTTON_SELECTOR).click() 
         
+        # 3. Playwright가 감지한 파일 선택창에 파일의 '절대 경로'를 설정
         print(f"[액션] 감지된 파일 선택창에 '{absolute_file_path}' 경로 주입...")
         file_chooser = fc_info.value
         file_chooser.set_files(absolute_file_path)
         
+        # 4. "네트워크 설정 포함?" 팝업이 뜰 때까지 대기
         print("[액션] '네트워크 설정 포함?' 팝업창 대기 중...")
         page.wait_for_selector("text=네트워크 설정 포함?", timeout=5000)
         
+        # 5. 팝업창의 '아니오' 버튼 클릭
         print("[액션] 팝업창의 '아니오' 버튼 클릭...")
         page.get_by_role("button", name="아니오").click()
         
@@ -161,11 +170,14 @@ def ui_set_note(page: Page, new_note_value: str):
         print("[액션] '저장' 버튼에 'click' 이벤트를 수동으로 발생시킵니다...")
         page.locator(SAVE_BUTTON_SELECTOR).dispatch_event("click")
         
-        print("[액션] '성공' 팝업창 대기 중...")
-        page.wait_for_selector("text=성공", timeout=5000)
+        print("[액션] '성공/Success' 팝업창(Dialog) 대기 중...")
+        # 현재 활성화된(보이는) 팝업창을 찾음
+        visible_dialog = page.locator(VISIBLE_DIALOG_SELECTOR)
+        visible_dialog.wait_for(timeout=5000)
         
-        print("[액션] 팝업창의 '확인' 버튼 클릭...")
-        page.get_by_role("button", name="확인").click()
+        print("[액션] 팝업창의 'OK/확인' 버튼 클릭...")
+        # 그 팝업창 내부에 있는 버튼(유일한 버튼)을 클릭
+        visible_dialog.get_by_role("button").click()
 
         print("[액션] '저장' 버튼이 다시 비활성화되기를 대기 중...")
         page.wait_for_selector(f"{SAVE_BUTTON_SELECTOR}[disabled]", timeout=5000)
@@ -175,4 +187,100 @@ def ui_set_note(page: Page, new_note_value: str):
     
     except Exception as e:
         print(f"❌ [액션] UI '설명' 값 변경 실패: {e}")
+        return False
+
+# -----------------------------------------------------------
+# ⚙️ [헬퍼 5] API로 '언어' 값 가져오기
+# -----------------------------------------------------------
+def api_get_language(page: Page, ip: str):
+    """
+    systemInfo API를 호출하여 현재 'language' 값을 반환합니다.
+    """
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=systemInfo&mode=1"
+    print(f"[API] 브라우저 세션으로 API 'language' 값 확인 시도...")
+    
+    try:
+        response_text = page.evaluate(
+            """
+            async (url) => {
+                try {
+                    const response = await fetch(url); 
+                    if (!response.ok) {
+                        return `Error: ${response.status} ${response.statusText}`;
+                    }
+                    return await response.text();
+                } catch (e) {
+                    return `Error: ${e.message}`;
+                }
+            }
+            """, 
+            api_url 
+        )
+
+        if response_text.startswith("Error:"):
+            print(f"[API] 'language' 값 확인 실패 (fetch): {response_text}")
+            return None
+
+        for line in response_text.split('&'):
+            if line.startswith("language="):
+                lang_value = line.split('=', 1)[1] 
+                print(f"[API] 현재 'language' 값 확인: {lang_value}")
+                return lang_value
+        return None 
+
+    except Exception as e:
+        print(f"[API] 'language' 값 확인 실패 (evaluate): {e}")
+        return None
+
+# -----------------------------------------------------------
+# ⚙️ [헬퍼 6] UI로 '언어' 값 변경하기
+# -----------------------------------------------------------
+# -----------------------------------------------------------
+# ⚙️ [헬퍼 6] UI로 '언어' 값 변경하기 (⭐️수정됨⭐️)
+# -----------------------------------------------------------
+def ui_set_language(page: Page, language_value: str):
+    """
+    UI에서 '언어' 드롭다운 값을 <option>의 'value' 속성을 이용해 변경하고 저장합니다.
+    (이 방식은 언어와 독립적입니다)
+    """
+    LANGUAGE_DROPDOWN_SELECTOR = "#set-lang"
+    SAVE_BUTTON_SELECTOR = "#setup-apply"
+    VISIBLE_DIALOG_SELECTOR = 'div.ui-dialog[style*="display: block"]'
+    
+    print(f"\n--- [액션] UI '언어' 값을 'value={language_value}'로 변경 시작 ---")
+    try:
+        page.locator("#Page200_id").click()
+        page.wait_for_timeout(500)
+        page.locator("#Page201_id").click()
+        page.wait_for_timeout(500)
+        
+        # ⭐️ [수정] label= 대신 value= 사용
+        print(f"[액션] 드롭다운에서 'value={language_value}' 선택...")
+        page.locator(LANGUAGE_DROPDOWN_SELECTOR).select_option(value=language_value)
+        
+        print("[액션] '저장' 버튼이 활성화되기를 대기 중...")
+        page.wait_for_selector(f"{SAVE_BUTTON_SELECTOR}:not([disabled])", timeout=5000)
+
+        print("[액션] '저장' 버튼에 'click' 이벤트를 수동으로 발생시킵니다...")
+        page.locator(SAVE_BUTTON_SELECTOR).dispatch_event("click")
+        
+        print("[액션] '성공/Success' 팝업창(Dialog) 대기 중...")
+        visible_dialog = page.locator(VISIBLE_DIALOG_SELECTOR)
+        visible_dialog.wait_for(timeout=5000)
+        
+        print("[액션] 팝업창의 'OK/확인' 버튼 클릭...")
+        visible_dialog.get_by_role("button").click()
+
+        print("[액션] '저장' 버튼이 다시 비활성화되기를 대기 중...")
+        page.wait_for_selector(f"{SAVE_BUTTON_SELECTOR}[disabled]", timeout=5000)
+        
+        print(f"✅ [액션] '언어' 값 'value={language_value}'로 변경 및 저장 완료.")
+        return True
+    
+    except Exception as e:
+        print(f"❌ [액션] UI '언어' 값 'value={language_value}'로 변경 실패: {e}")
+        return False
+    
+    except Exception as e:
+        print(f"❌ [액션] UI '언어' 값 변경 실패: {e}")
         return False

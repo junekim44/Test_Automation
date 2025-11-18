@@ -1,6 +1,6 @@
 from playwright.sync_api import Page
 
-# 1. 👈 'common_actions.py' 파일에서 필요한 헬퍼 함수들을 import
+# 1. 'common_actions.py' 파일에서 필요한 헬퍼 함수들을 import
 try:
     from common_actions import (
         export_and_verify_settings, 
@@ -27,7 +27,6 @@ def run_setup_roundtrip_test(page: Page, camera_ip: str):
     정상 동작하는지 검증하는 E2E 테스트 시나리오.
     """
     
-    # 이 테스트 케이스에서만 사용할 상수 정의
     EXPORT_FILE = "registry_test.dat"
     TEST_NOTE_VALUE = "AUTOMATION_TEST_VALUE_12345"
     CONTAMINATE_VALUE = "DIRTY_VALUE_999"
@@ -81,7 +80,7 @@ def run_setup_roundtrip_test(page: Page, camera_ip: str):
         return False, str(e)
 
 # -----------------------------------------------------------
-# ⚙️ 테스트 케이스 2: (여기에 다음 '시스템' 관련 테스트 추가)
+# ⚙️ (나중에 여기에 '시스템' 관련 두 번째 테스트 케이스 추가)
 # -----------------------------------------------------------
-# def run_system_led_test(page: Page, camera_ip: str):
+# def run_reboot_test(page: Page, camera_ip: str):
 #    ...
