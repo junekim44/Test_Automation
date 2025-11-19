@@ -3,7 +3,7 @@ from playwright.sync_api import sync_playwright
 
 # 1. 실행할 테스트 케이스가 있는 파일들을 import
 try:
-    from system_tests import run_setup_roundtrip_test
+    from system_tests import run_setup_roundtrip_test, run_default_setup_test
     from language_test import run_all_languages_test
 except ImportError:
     print("오류: 'common_actions.py', 'system_tests.py', 'language_test.py' 파일이 같은 폴더에 있는지 확인하세요.")
@@ -43,19 +43,27 @@ def main():
             # ----------------------------------------------------
             
             # --- [테스트 1: 설정 내보내기/불러오기] ---
-            # print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
-            # success, message = run_setup_roundtrip_test(page, CAMERA_IP)
-            # if not success:
-            #     raise Exception(f"시스템 테스트 실패: {message}")
-            # print(f"\n🎉 [메인] {message}")
+            print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
+            success, message = run_default_setup_test(page, CAMERA_IP)
+            if not success:
+                raise Exception(f"시스템 테스트 실패: {message}")
+            print(f"\n🎉 [메인] {message}")
             
+            # --- [테스트 2: 설정 내보내기/불러오기] ---
+            print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
+            success, message = run_setup_roundtrip_test(page, CAMERA_IP)
+            if not success:
+                raise Exception(f"시스템 테스트 실패: {message}")
+            print(f"\n🎉 [메인] {message}")
 
-            # --- [테스트 2: 전체 언어 변경] ---
+            # --- [테스트 3: 전체 언어 변경] ---
             print("\n--- [메인] '언어' 테스트 케이스 실행 ---")
             success, message = run_all_languages_test(page, CAMERA_IP)
             if not success:
                 raise Exception(f"언어 테스트 실패: {message}")
             print(f"\n🎉 [메인] {message}")
+
+            
 
             # ----------------------------------------------------
 
