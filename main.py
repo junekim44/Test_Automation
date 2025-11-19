@@ -6,6 +6,8 @@ try:
     from system_tests import run_default_setup_test, run_setup_roundtrip_test
     # from datetime_tests import run_ntp_test, run_timezone_test, run_format_test
     from language_test import run_all_languages_test # 필요시 주석 해제
+    from datetime_test import run_datetime_tests
+    from user_group_tests import run_user_group_test
 except ImportError as e:
     print(f"오류: 파일이나 함수를 찾을 수 없습니다. {e}")
     exit()
@@ -40,27 +42,24 @@ def main():
             # print(f"🎉 [성공] {msg}")
 
             # # 설정 내보내기/불러오기
-            success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
-            if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
-            print(f"🎉 [성공] {msg}")
+            # success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
             # # 다국어 변경 테스트
             # success, msg = run_all_languages_test(page, CAMERA_IP)
             # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
             # print(f"🎉 [성공] {msg}")
 
-            # # 3. 날짜/시간 테스트 (NTP, Timezone, Format)
-            # success, msg = run_ntp_test(page, CAMERA_IP)
-            # if not success: raise Exception(f"NTP 테스트 실패: {msg}")
+            # # 날짜/시간 테스트 (NTP, Timezone, Format)
+            # success, msg = run_datetime_tests(page, CAMERA_IP)
+            # if not success: raise Exception(msg)
             # print(f"🎉 [성공] {msg}")
 
-            # success, msg = run_timezone_test(page, CAMERA_IP)
-            # if not success: raise Exception(f"시간대 테스트 실패: {msg}")
-            # print(f"🎉 [성공] {msg}")
-
-            # success, msg = run_format_test(page, CAMERA_IP)
-            # if not success: raise Exception(f"포맷 테스트 실패: {msg}")
-            # print(f"🎉 [성공] {msg}")
+            # --- [사용자/그룹 테스트] ---
+            success, msg = run_user_group_test(page, CAMERA_IP)
+            if not success: raise Exception(msg)
+            print(f"🎉 [성공] {msg}")
 
             # ----------------------------------------------------
             print("\n✅ 모든 테스트가 성공적으로 완료되었습니다.")
