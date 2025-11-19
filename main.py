@@ -34,19 +34,20 @@ def main():
             # 🧪 테스트 실행 (순서: 초기화 -> 기능테스트 -> 기타)
             # ----------------------------------------------------
             
-            # # 1. 시스템 초기화 및 복구 (가장 먼저 실행하여 Clean State 확보)
+            # 시스템 초기화 및 복구 (가장 먼저 실행하여 Clean State 확보)
             # success, msg = run_default_setup_test(page, CAMERA_IP)
             # if not success: raise Exception(f"초기화 테스트 실패: {msg}")
             # print(f"🎉 [성공] {msg}")
 
-            # # 2. 설정 내보내기/불러오기
-            # success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
-            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
-            # print(f"🎉 [성공] {msg}")
-
-            success, msg = run_all_languages_test(page, CAMERA_IP)
+            # # 설정 내보내기/불러오기
+            success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
             if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
             print(f"🎉 [성공] {msg}")
+
+            # # 다국어 변경 테스트
+            # success, msg = run_all_languages_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
             # # 3. 날짜/시간 테스트 (NTP, Timezone, Format)
             # success, msg = run_ntp_test(page, CAMERA_IP)
