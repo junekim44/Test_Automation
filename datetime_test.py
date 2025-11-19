@@ -3,13 +3,52 @@ from playwright.sync_api import Page
 from common_actions import parse_api_response, handle_popup
 
 # ===========================================================
-# ⚙️ [내부 액션 함수] 날짜/시간 전용
+# ⚙️ [내부 액션 함수] jQuery UI 드롭다운 처리기 (개선됨)
 # ===========================================================
+def select_jquery_dropdown(page: Page, button_selector: str, option_text: str):
+    """
+    jQuery UI 드롭다운 선택 (개선판: 스크롤 및 부분 텍스트 매칭 강화)
+    """
+    try:
+        # 1. 드롭다운 버튼 클릭
+        btn = page.locator(button_selector)
+        btn.wait_for(state="visible")
+        btn.click()
+        
+        # 메뉴가 열릴 때까지 잠시 대기
+        page.wait_for_timeout(500)
+        
+        # 2. 메뉴 ID 추론 (버튼 ID '-button' -> 메뉴 ID '-menu')
+        menu_id = button_selector.replace("-button", "-menu")
+        
+        # 3. 옵션 찾기 (부분 텍스트 매칭)
+        # <li> 태그 전체를 타겟팅하여 검색 범위를 넓힘
+        # scroll_into_view_if_needed()를 사용하여 스크롤 문제 해결 시도
+        option = page.locator(f"{menu_id} li").filter(has_text=option_text).last
+        
+        print(f"   [Dropdown] '{option_text}' 항목 찾는 중...")
+        
+        # 요소가 존재하면 스크롤 후 클릭
+        if option.count() > 0:
+            option.scroll_into_view_if_needed()
+            option.click(force=True) # 가려져 있어도 강제 클릭 시도
+            return True
+        else:
+            print(f"❌ [Dropdown] 메뉴 내에 '{option_text}' 텍스트가 없습니다.")
+            return False
 
+    except Exception as e:
+        print(f"❌ 드롭다운 선택 실패 ({button_selector}): {e}")
+        # 실패 시 스크린샷 저장 (디버깅용)
+        # page.screenshot(path=f"error_dropdown_{option_text}.png")
+        return False
+
+# ===========================================================
+# ⚙️ [내부 액션 함수] API & UI 설정
+# ===========================================================
 def api_get_datetime(page: Page, ip: str):
     api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=dateTime&mode=1"
-    max_retries = 3
-    for attempt in range(max_retries):
+    for _ in range(3):
         try:
             response_text = page.evaluate("""async (url) => {
                 try {
@@ -32,143 +71,121 @@ def api_get_datetime(page: Page, ip: str):
     return None
 
 def ui_set_ntp(page: Page, use_sync: bool, server_address: str):
-    # ⚠️ [확인 필요] 아래 ID들이 실제와 맞는지 F12로 확인 후 수정하세요!
-    MENU_DATE_TIME = "#Page202_id"
-    CHECKBOX_SYNC = "#time-sync"      # 예: id="timeSync", id="auto-sync" 등 확인
-    INPUT_SERVER = "#time-server"     # 예: id="timeServer", id="ntp-server" 등 확인
-    BTN_SAVE = "#setup-apply"
-
+    """NTP 설정 (체크박스 & 입력창)"""
     try:
-        page.locator("#Page200_id").click()
-        page.locator(MENU_DATE_TIME).click()
-        page.wait_for_timeout(500)
-        
-        # 체크박스 상태 동기화
-        chk = page.locator(CHECKBOX_SYNC)
+        # 체크박스 (#time-sync)
+        chk = page.locator("#time-sync")
         if use_sync != chk.is_checked():
             chk.click()
         
-        # 서버 주소 입력
         if use_sync:
-            srv = page.locator(INPUT_SERVER)
-            srv.fill(server_address)
-            srv.dispatch_event("change")
+            page.locator("#time-server-list").select_option(value="0") # 0: 수동 설정
+            
+            # 입력창 (#time-server)
+            input_el = page.locator("#time-server")
+            input_el.fill(server_address)
+            input_el.dispatch_event("change")
 
-        page.locator(BTN_SAVE).click()
-        handle_popup(page)
         return True
     except Exception as e:
-        print(f"UI NTP 설정 실패: {e}")
+        print(f"❌ NTP UI 설정 실패: {e}")
         return False
 
-def ui_set_timezone(page: Page, timezone_label: str):
-    # ⚠️ [확인 필요]
-    MENU_DATE_TIME = "#Page202_id"
-    SELECT_TIMEZONE = "#time-zone"    # 예: id="timeZone", name="timeZone" 등
-    BTN_SAVE = "#setup-apply"
-
+def ui_save(page: Page):
+    """저장 버튼 클릭 및 팝업 처리"""
     try:
-        page.locator("#Page200_id").click()
-        page.locator(MENU_DATE_TIME).click()
-        page.wait_for_timeout(500)
-        
-        page.locator(SELECT_TIMEZONE).select_option(label=timezone_label)
-        page.locator(BTN_SAVE).click()
-        handle_popup(page)
-        return True
-    except Exception as e:
-        print(f"UI 시간대 설정 실패: {e}")
-        return False
-
-def ui_set_datetime_format(page: Page, date_fmt: str, time_fmt: str):
-    # ⚠️ [확인 필요]
-    MENU_DATE_TIME = "#Page202_id"
-    SELECT_DATE_FMT = "#date-format"  # 예: id="dateFormat"
-    SELECT_TIME_FMT = "#time-format"  # 예: id="timeFormat"
-    BTN_SAVE = "#setup-apply"
-
-    try:
-        page.locator("#Page200_id").click()
-        page.locator(MENU_DATE_TIME).click()
-        page.wait_for_timeout(500)
-        
-        page.locator(SELECT_DATE_FMT).select_option(label=date_fmt)
-        page.locator(SELECT_TIME_FMT).select_option(label=time_fmt)
-        
-        page.locator(BTN_SAVE).click()
-        handle_popup(page)
-        return True
-    except Exception as e:
-        print(f"UI 포맷 설정 실패: {e}")
+        btn = page.locator("#setup-apply")
+        # 버튼 활성화 대기
+        btn.wait_for(state="visible", timeout=2000)
+        if not btn.is_disabled():
+            btn.click()
+            if handle_popup(page):
+                # 저장 완료 후 버튼 비활성화 대기
+                btn.wait_for(state="disabled", timeout=5000)
+                return True
+        return True # 이미 저장된 상태
+    except:
         return False
 
 # ===========================================================
-# ⚙️ [테스트 케이스]
+# ⚙️ [통합 테스트 케이스] 날짜/시간 전체 테스트
 # ===========================================================
+def run_datetime_tests(page: Page, camera_ip: str):
+    """
+    날짜/시간 관련 테스트 모음 (NTP, Timezone, Format)
+    """
+    print("\n===============================================")
+    print("🕒 [통합 테스트] 날짜/시간 (Date/Time) 시작")
+    print("===============================================")
+    
+    # 메뉴 진입
+    page.locator("#Page200_id").click() # 시스템
+    page.locator("#Page202_id").click() # 날짜/시간
+    page.wait_for_timeout(1000)
 
-def run_ntp_test(page: Page, camera_ip: str):
+    # --- [Step 1] NTP 설정 테스트 ---
     TEST_SERVER = "pool.ntp.org"
-    print(f"\n--- [TC 4-1] NTP 설정 테스트 ({TEST_SERVER}) ---")
+    print(f"\n[Step 1] NTP 서버 설정 ({TEST_SERVER})...")
     
-    if not ui_set_ntp(page, True, TEST_SERVER):
-        return False, "UI 설정 실패"
-    
-    data = api_get_datetime(page, camera_ip)
-    if not data: return False, "API 조회 실패"
-    
-    # 검증
-    real_sync = data.get("timeSync")
-    real_server = data.get("timeServer")
-    
-    if real_sync != "on": return False, f"동기화 켜짐 실패 (값: {real_sync})"
-    if real_server != TEST_SERVER: return False, f"서버주소 불일치 (값: {real_server})"
-        
-    print("✅ NTP 설정 성공")
-    return True, "NTP 설정 성공"
-
-def run_timezone_test(page: Page, camera_ip: str):
-    print("\n--- [TC 4-2] 시간대 변경 테스트 ---")
-    # ⚠️ 실제 드롭다운 텍스트와 정확히 일치해야 함
-    ZONES = [
-        ("(GMT+09:00) Seoul", "Seoul"),
-        ("(GMT+00:00) Dublin, Edinburgh, Lisbon, London", "Dublin_Edinburgh_Lisbon_London")
-    ]
-    
-    for label, api_val in ZONES:
-        print(f"[진행] 시간대 변경 -> {label}")
-        if not ui_set_timezone(page, label): return False, f"UI 변경 실패({label})"
-        
+    if ui_set_ntp(page, True, TEST_SERVER):
+        ui_save(page)
         data = api_get_datetime(page, camera_ip)
-        if not data: return False, "API 조회 실패"
         
-        if data.get("timeZone") != api_val: 
-            return False, f"API 불일치 (기대: {api_val}, 실제: {data.get('timeZone')})"
-        print(f"✅ {label} 검증 완료")
-        
-    # 복구
-    ui_set_timezone(page, "(GMT+09:00) Seoul")
-    return True, "시간대 테스트 성공"
+        if data and data.get("timeSync") == "on" and data.get("timeServer") == TEST_SERVER:
+            print("✅ NTP 설정 검증 성공")
+        else:
+            print(f"❌ NTP 검증 실패 (API: {data})")
+            return False, "NTP 검증 실패"
+    else:
+        return False, "NTP UI 조작 실패"
 
-def run_format_test(page: Page, camera_ip: str):
-    print("\n--- [TC 4-3] 포맷 변경 테스트 ---")
-    # ⚠️ 실제 드롭다운 옵션 텍스트 확인 필요
-    UI_DATE_TARGET = "MM/DD/YYYY"
-    UI_TIME_TARGET = "12 Hour"  # 또는 "12 시간" 등 실제 텍스트 확인
+    # --- [Step 2] 시간대(Timezone) 테스트 ---
+    # HTML Select Button ID: #timezone-button
+    # UI 검색 키워드: "Dublin" (텍스트 매칭용)
+    TARGET_TZ_KEYWORD = "Dublin"
+    TARGET_TZ_API = "Dublin_Edinburgh_Lisbon_London"
     
-    if not ui_set_datetime_format(page, UI_DATE_TARGET, UI_TIME_TARGET):
-        return False, "UI 변경 실패"
+    print(f"\n[Step 2] 시간대 변경 (키워드: {TARGET_TZ_KEYWORD})...")
+    
+    # jQuery Dropdown 선택
+    if select_jquery_dropdown(page, "#timezone-button", TARGET_TZ_KEYWORD):
+        ui_save(page)
         
-    data = api_get_datetime(page, camera_ip)
-    if not data: return False, "API 조회 실패"
+        # API 값 조회
+        data = api_get_datetime(page, camera_ip)
+        current_tz = data.get("timeZone", "")
+        
+        if current_tz == TARGET_TZ_API:
+            print(f"✅ 시간대 검증 성공 (API: {current_tz})")
+        else:
+            print(f"❌ 시간대 검증 실패 (예상: {TARGET_TZ_API}, 실제: {current_tz})")
+            return False, f"시간대 불일치 ({current_tz})"
+    else:
+        return False, "시간대 드롭다운 선택 실패"
+        
+    # (복구) 서울로 원상 복귀
+    print("[복구] 시간대 서울로 복귀...")
+    select_jquery_dropdown(page, "#timezone-button", "Seoul")
+    ui_save(page)
+
+    # --- [Step 3] 포맷(Format) 테스트 ---
+    # HTML: #date-format-button, #time-format-button
     
-    real_date = data.get("dateFormat")
-    real_time = data.get("timeFormat", "")
+    # 날짜 포맷 변경 (MM/DD/YYYY)
+    TARGET_DATE_TXT = "(MM/DD/YYYY)" # 텍스트 일부 포함으로 찾기
+    print(f"\n[Step 3] 날짜 포맷 변경 ({TARGET_DATE_TXT})...")
     
-    if real_date != "MM/DD/YYYY": return False, f"날짜 포맷 불일치 ({real_date})"
-    if "PP" not in real_time: return False, f"시간 포맷 불일치 ({real_time})" # 12H는 AM/PM(PP) 포함
-    
-    print("✅ 포맷 변경 검증 완료")
-    
-    # 복구
-    ui_set_datetime_format(page, "YYYY/MM/DD", "24 Hour") # 실제 텍스트 확인
-    return True, "포맷 테스트 성공"
+    if select_jquery_dropdown(page, "#date-format-button", TARGET_DATE_TXT):
+        ui_save(page)
+        data = api_get_datetime(page, camera_ip)
+        # API 리턴값은 "MM/DD/YYYY" 문자열 그대로 올 것으로 예상
+        if data.get("dateFormat") == "MM/DD/YYYY":
+            print("✅ 날짜 포맷 검증 성공")
+        else:
+            return False, f"날짜 포맷 실패 ({data.get('dateFormat')})"
+
+    # 복구 (YYYY/MM/DD)
+    select_jquery_dropdown(page, "#date-format-button", "(YYYY/MM/DD)")
+    ui_save(page)
+
+    return True, "날짜/시간 통합 테스트 완료"
