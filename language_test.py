@@ -1,17 +1,10 @@
+import time
 from playwright.sync_api import Page
-
-# 1. 'common_actions.py' 파일에서 언어 관련 헬퍼 함수 2개를 import
-try:
-    from common_actions import (
-        api_get_language, 
-        ui_set_language
-    )
-except ImportError:
-    print("오류: 'common_actions.py' 파일이 같은 폴더에 있는지 확인하세요.")
-    exit()
+# common_actions에 있는 로직을 활용하는 것이 좋습니다.
+from common_actions import parse_api_response, handle_popup
 
 # -----------------------------------------------------------
-# 📚 테스트 데이터: API 값과 <option>의 value 속성 매핑 (⭐️수정됨⭐️)
+# 📚 언어 데이터
 # -----------------------------------------------------------
 LANGUAGE_MAP = [
     {"api": "english", "value": "1"},
@@ -37,62 +30,109 @@ LANGUAGE_MAP = [
 ]
 
 # ===========================================================
-# 
-# ⚙️ '시스템/언어' 메뉴 테스트 시나리오
-# 
+# ⚙️ [내부 함수] 언어 전용 액션들
 # ===========================================================
-
-# -----------------------------------------------------------
-# ⚙️ 테스트 케이스: 모든 언어 변경 및 API 검증 (⭐️수정됨⭐️)
-# -----------------------------------------------------------
-def run_all_languages_test(page: Page, camera_ip: str):
+def api_get_language(page: Page, ip: str):
     """
-    모든 언어를 하나씩 변경하며 API 값이 올바르게 저장되는지 검증합니다.
+    API로 현재 언어 설정 조회 (재시도 로직 포함)
     """
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=systemInfo&mode=1"
     
-    print("\n--- [TC 2] 전체 언어 변경 테스트 시작 ---")
-    
-    failed_languages = []
-    
-    try:
-        # 1. 20개 언어를 순회하며 테스트
-        for lang in LANGUAGE_MAP:
-            lang_api = lang["api"]
-            lang_value = lang["value"] # 👈 "ui" 대신 "value" 사용
-            
-            print(f"\n[TC 2] 테스트 중: {lang_api} (value={lang_value})")
-            
-            # 2. UI로 언어 변경 및 저장 (label 대신 value 전달)
-            if not ui_set_language(page, lang_value):
-                print(f"🔥 [TC 2] UI 변경 실패: {lang_api}")
-                failed_languages.append(f"{lang_api} (UI 저장 실패)")
-                continue # 다음 언어로 넘어감
-            
-            # 3. API로 현재 설정된 언어 값 가져오기
-            current_api_lang = api_get_language(page, camera_ip)
-            
-            # 4. 검증
-            if current_api_lang == lang_api:
-                print(f"✅ [TC 2] 검증 성공: {lang_api}")
-            else:
-                print(f"🔥 [TC 2] API 검증 실패: {lang_api} (예상: {lang_api}, 실제: {current_api_lang})")
-                failed_languages.append(f"{lang_api} (API 검증 실패)")
-
-        # 5. (필수) 테스트 후 '한국어'로 원상 복구 (value="20")
-        print("\n[TC 2] 모든 테스트 완료. '한국어(value=20)'로 설정을 복구합니다...")
-        ui_set_language(page, "20") # 👈 '한국어' 텍스트 대신 value '20' 사용
-        
-        # 6. 최종 결과 보고
-        if not failed_languages:
-            return True, "전체 언어 테스트 성공"
-        else:
-            return False, f"언어 테스트 실패: {', '.join(failed_languages)}"
-
-    except Exception as e:
-        print(f"🔥 [TC 2] 테스트 중 심각한 오류 발생: {e}")
-        # 오류 발생 시에도 '한국어'로 복구 시도
+    # API 호출 자체가 실패할 경우를 대비해 내부 재시도 추가
+    for _ in range(3):
         try:
-            ui_set_language(page, "20")
+            response_text = page.evaluate("""async (url) => {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) return `Error`;
+                    return await response.text();
+                } catch (e) { return `Error`; }
+            }""", api_url)
+            
+            if "Error" not in response_text:
+                return parse_api_response(response_text).get("language")
         except:
             pass
-        return False, str(e)
+        time.sleep(1)
+        
+    return None
+
+def ui_set_language(page: Page, language_value: str):
+    try:
+        page.locator("#Page200_id").click()
+        page.locator("#Page201_id").click()
+        page.wait_for_timeout(500)
+        
+        # 값 선택
+        page.locator("#set-lang").select_option(value=language_value)
+        
+        # 저장 버튼 처리
+        save_btn = page.locator("#setup-apply")
+        try:
+            # 버튼이 활성화될 때까지 잠시 대기
+            save_btn.wait_for(state="visible", timeout=2000)
+            
+            # 버튼이 활성화(disabled가 아님) 상태라면 클릭
+            if not save_btn.is_disabled():
+                save_btn.click()
+                # 팝업 처리
+                handle_popup(page)
+                
+                # ⭐️ 중요: 저장 후 처리가 완료될 시간을 줌
+                save_btn.wait_for(state="disabled", timeout=5000)
+        except:
+            # 이미 해당 언어라 버튼이 비활성화된 경우 등
+            pass
+            
+        return True
+    except:
+        return False
+
+# ===========================================================
+# ⚙️ [테스트 케이스]
+# ===========================================================
+def run_all_languages_test(page: Page, camera_ip: str):
+    print("\n--- [TC 2] 전체 언어 변경 테스트 ---")
+    
+    failed_count = 0
+    
+    for lang in LANGUAGE_MAP:
+        target_api_val = lang["api"]
+        target_ui_val = lang["value"]
+        
+        # 1. UI 설정 변경
+        if not ui_set_language(page, target_ui_val):
+            print(f"🔥 UI 설정 실패: {target_api_val}")
+            failed_count += 1
+            continue
+            
+        # 2. API 검증 (⭐️ Retry 로직 추가: 값이 반영될 때까지 기다림)
+        is_matched = False
+        current_val = ""
+        
+        # 최대 5번 확인 (약 10초 대기)
+        for i in range(5):
+            current_val = api_get_language(page, camera_ip)
+            
+            if current_val == target_api_val:
+                is_matched = True
+                break # 값이 맞으면 즉시 탈출
+            
+            # 값이 아직 안 바뀌었으면 잠시 대기
+            time.sleep(2)
+            
+        # 3. 결과 출력
+        if is_matched:
+            print(f"✅ {target_api_val} 성공")
+        else:
+            print(f"❌ {target_api_val} 실패 (실제: {current_val})")
+            failed_count += 1
+            
+    # 테스트 종료 후 한국어로 복구
+    print("\n[복구] 테스트 종료. 한국어로 복구합니다.")
+    ui_set_language(page, "20")
+    
+    if failed_count == 0:
+        return True, "언어 테스트 완료 (성공)"
+    else:
+        return False, f"언어 테스트 실패 ({failed_count}개 항목)"

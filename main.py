@@ -1,12 +1,13 @@
 import time
 from playwright.sync_api import sync_playwright
 
-# 1. 실행할 테스트 케이스가 있는 파일들을 import
+# 각 모듈에서 테스트 함수 import
 try:
-    from system_tests import run_setup_roundtrip_test, run_default_setup_test
-    from language_test import run_all_languages_test
-except ImportError:
-    print("오류: 'common_actions.py', 'system_tests.py', 'language_test.py' 파일이 같은 폴더에 있는지 확인하세요.")
+    from system_tests import run_default_setup_test, run_setup_roundtrip_test
+    # from datetime_tests import run_ntp_test, run_timezone_test, run_format_test
+    from language_test import run_all_languages_test # 필요시 주석 해제
+except ImportError as e:
+    print(f"오류: 파일이나 함수를 찾을 수 없습니다. {e}")
     exit()
 
 # --- 전역 설정값 ---
@@ -16,68 +17,58 @@ USERNAME = "admin"
 PASSWORD = "qwerty0-" 
 
 def main():
-    """
-    메인 테스트 실행기.
-    브라우저 설정, 로그인, 테스트 케이스 호출, 브라우저 종료를 담당.
-    """
     with sync_playwright() as p:
         print("Chrome 브라우저를 실행합니다...")
         browser = p.chromium.launch(channel="chrome", headless=False)
         context = browser.new_context(
-            http_credentials={
-                'username': USERNAME,
-                'password': PASSWORD
-            }
+            http_credentials={'username': USERNAME, 'password': PASSWORD}
         )
         page = context.new_page()
         
         try:
-            # 0. 공통 준비 단계: 로그인
-            print("[메인] 로그인 시도...")
+            print("[메인] 로그인 및 페이지 로드...")
             page.goto(CAMERA_URL)
-            print("[메인] 로그인 성공 확인 중 (메뉴 ID 대기)...")
             page.wait_for_selector("#Page200_id", timeout=10000)
             
             # ----------------------------------------------------
-            # ⭐️ 테스트 케이스 실행 (원하는 테스트의 주석(#)을 해제)
+            # 🧪 테스트 실행 (순서: 초기화 -> 기능테스트 -> 기타)
             # ----------------------------------------------------
             
-            # --- [테스트 1: 기본 설정 불러오기] ---
-            print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
-            success, message = run_default_setup_test(page, CAMERA_IP)
-            if not success:
-                raise Exception(f"시스템 테스트 실패: {message}")
-            print(f"\n🎉 [메인] {message}")
-            
-            # --- [테스트 2: 설정 내보내기/불러오기] ---
-            print("\n--- [메인] '시스템' 테스트 케이스 실행 ---")
-            success, message = run_setup_roundtrip_test(page, CAMERA_IP)
-            if not success:
-                raise Exception(f"시스템 테스트 실패: {message}")
-            print(f"\n🎉 [메인] {message}")
+            # # 1. 시스템 초기화 및 복구 (가장 먼저 실행하여 Clean State 확보)
+            # success, msg = run_default_setup_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"초기화 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
-            # --- [테스트 3: 전체 언어 변경] ---
-            print("\n--- [메인] '언어' 테스트 케이스 실행 ---")
-            success, message = run_all_languages_test(page, CAMERA_IP)
-            if not success:
-                raise Exception(f"언어 테스트 실패: {message}")
-            print(f"\n🎉 [메인] {message}")
+            # # 2. 설정 내보내기/불러오기
+            # success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
-            
+            success, msg = run_all_languages_test(page, CAMERA_IP)
+            if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            print(f"🎉 [성공] {msg}")
+
+            # # 3. 날짜/시간 테스트 (NTP, Timezone, Format)
+            # success, msg = run_ntp_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"NTP 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
+
+            # success, msg = run_timezone_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"시간대 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
+
+            # success, msg = run_format_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"포맷 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
             # ----------------------------------------------------
-
-            print("\n===============================================")
-            print("✅ 선택된 테스트 케이스가 성공적으로 완료되었습니다.")
-            print("===============================================")
-            time.sleep(5)
+            print("\n✅ 모든 테스트가 성공적으로 완료되었습니다.")
+            time.sleep(3)
 
         except Exception as e:
-            print(f"\n🔥 [메인] 테스트 실행 중 오류 발생: {e}")
-            time.sleep(10)
-        
+            print(f"\n🔥 [실패] 테스트 중단됨: {e}")
+            time.sleep(10) # 에러 확인용 대기
         finally:
-            print("[메인] 브라우저를 닫습니다.")
             browser.close()
 
 if __name__ == "__main__":

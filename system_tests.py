@@ -1,146 +1,200 @@
+import os
+import time
 from playwright.sync_api import Page
-
-# 1. 'common_actions.py' 파일에서 필요한 헬퍼 함수들을 import
-try:
-    from common_actions import (
-        export_and_verify_settings, 
-        import_settings_and_reboot, 
-        api_get_note, 
-        ui_set_note,
-        load_default_settings
-    )
-except ImportError:
-    print("오류: 'common_actions.py' 파일이 같은 폴더에 있는지 확인하세요.")
-    exit()
+from common_actions import parse_api_response, handle_popup, VISIBLE_DIALOG, DIALOG_BUTTONS
 
 # ===========================================================
-# 
-# ⚙️ '시스템' 메뉴 테스트 시나리오
-# 
+# ⚙️ [내부 액션 함수] 시스템 테스트 전용
 # ===========================================================
 
-# -----------------------------------------------------------
-# ⚙️ 테스트 케이스 1: 설정 내보내기/불러오기 Round-Trip
-# -----------------------------------------------------------
-def run_setup_roundtrip_test(page: Page, camera_ip: str):
-    """
-    '설명' 필드 값 변경을 통해 설정 내보내기/불러오기 기능이
-    정상 동작하는지 검증하는 E2E 테스트 시나리오.
-    """
-    
-    EXPORT_FILE = "registry_test.dat"
-    TEST_NOTE_VALUE = "AUTOMATION_TEST_VALUE_12345"
-    CONTAMINATE_VALUE = "DIRTY_VALUE_999"
-    
-    print("\n--- [TC 1] 설정 내보내기/불러오기 테스트 시작 ---")
+def api_get_note(page: Page, ip: str):
+    """API로 '설명(Note)' 값 조회 (재시도 로직 포함)"""
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=systemInfo&mode=1"
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response_text = page.evaluate("""async (url) => {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) return `Error: ${response.status}`;
+                    return await response.text();
+                } catch (e) { return `Error: ${e.message}`; }
+            }""", api_url)
+
+            # 401이면 세션 갱신 후 재시도
+            if "Error: 401" in response_text:
+                page.reload()
+                page.wait_for_selector("#Page200_id", timeout=15000)
+                time.sleep(2)
+                continue
+
+            if response_text and not response_text.startswith("Error"):
+                val = parse_api_response(response_text).get("note", "")
+                if val is None: val = ""
+                return val
+        except:
+            time.sleep(2)
+    return None
+
+def ui_set_note(page: Page, new_note_value: str):
+    """UI에서 '설명' 값 변경"""
+    try:
+        page.locator("#Page200_id").click() # 시스템
+        page.locator("#Page201_id").click() # 일반
+        page.wait_for_timeout(500)
+        
+        # 값이 이미 같으면 패스
+        input_el = page.locator("#note")
+        if input_el.input_value() == new_note_value:
+            return True
+
+        input_el.fill(new_note_value)
+        input_el.dispatch_event("input")
+        input_el.dispatch_event("change")
+        
+        page.locator("#setup-apply").click()
+        handle_popup(page) # 성공 팝업 처리
+        return True
+    except:
+        return False
+
+def export_settings(page: Page, save_as="registry.dat"):
+    """설정 내보내기"""
+    if os.path.exists(save_as): os.remove(save_as)
+    try:
+        page.locator("#Page200_id").click()
+        page.locator("#Page201_id").click()
+        page.wait_for_timeout(500)
+
+        with page.expect_download() as download_info:
+            page.locator("#reg-export").click()
+        
+        download_info.value.save_as(save_as)
+        return os.path.exists(save_as) and os.path.getsize(save_as) > 0
+    except:
+        return False
+
+def import_settings(page: Page, file_path="registry.dat"):
+    """설정 불러오기"""
+    if not os.path.exists(file_path): return False
+    file_path = os.path.abspath(file_path)
     
     try:
-        # 1. (준비) 테스트 값으로 설정 변경 (헬퍼 함수 호출)
-        print("[TC 1.1] '설명' 값을 테스트 값으로 변경합니다...")
-        if not ui_set_note(page, TEST_NOTE_VALUE):
-            raise Exception("'설명' 값 설정(UI) 실패")
-        
-        # 2. (내보내기) 이 설정이 담긴 파일 내보내기 (헬퍼 함수 호출)
-        print(f"[TC 1.2] '{TEST_NOTE_VALUE}' 값이 담긴 설정을 내보냅니다...")
-        success, msg = export_and_verify_settings(page, EXPORT_FILE)
-        if not success:
-            raise Exception(f"'설정 내보내기' 실패: {msg}")
-        print(f"✅ [TC 1.2] 설정 파일 '{EXPORT_FILE}' 내보내기 성공.")
-        
-        # 3. (오염) 값을 엉뚱한 값으로 다시 변경 (헬퍼 함수 호출)
-        print("[TC 1.3] '설명' 값을 '오염' 값으로 덮어씁니다...")
-        if not ui_set_note(page, CONTAMINATE_VALUE):
-            raise Exception("'설명' 값 오염(UI) 실패")
-        
-        # API로 오염되었는지 확인 (헬퍼 함수 호출)
-        note_check = api_get_note(page, camera_ip) 
-        if note_check != CONTAMINATE_VALUE:
-             raise Exception(f"값 오염 실패! (현재 값: {note_check})")
-        print(f"✅ [TC 1.3] 값 오염 완료 (현재 'note' = {CONTAMINATE_VALUE})")
+        page.locator("#Page200_id").click()
+        page.locator("#Page201_id").click()
+        page.wait_for_timeout(500)
 
-        # 4. (불러오기) 2번에서 내보낸 파일 불러오기 (헬퍼 함수 호출)
-        print(f"[TC 1.4] '{EXPORT_FILE}' 파일을 '불러오기' 합니다...")
-        success, msg = import_settings_and_reboot(page, EXPORT_FILE)
-        if not success:
-            raise Exception(f"'설정 불러오기' 실패: {msg}")
-        print("✅ [TC 1.4] 설정 불러오기 완료.")
-        
-        # 5. (최종 검증)
-        print("[TC 1.5] API로 최종 'note' 값을 검증합니다...")
-        final_note_value = api_get_note(page, camera_ip) # (헬퍼 함수 호출)
-        
-        if final_note_value == TEST_NOTE_VALUE:
-            print(f"✅ [TC 1.5] 검증 성공! 'note' 값이 '{TEST_NOTE_VALUE}'로 복원됨.")
-            return True, "설정 Round-Trip 테스트 성공"
-        else:
-            print(f"🔥 [TC 1.5] 검증 실패! (예상: {TEST_NOTE_VALUE}, 실제: {final_note_value})")
-            return False, f"최종 검증 실패 (예상: {TEST_NOTE_VALUE}, 실제: {final_note_value})"
+        with page.expect_file_chooser() as fc_info:
+            page.locator("#reg-import").click()
+        fc_info.value.set_files(file_path)
 
+        # 네트워크 설정 포함? -> 아니오(2번째 버튼)
+        confirm = page.locator(VISIBLE_DIALOG).filter(has=page.locator("#load-import-setup-diag"))
+        confirm.wait_for(state="visible", timeout=5000)
+        btns = confirm.locator(DIALOG_BUTTONS)
+        if btns.count() > 1: btns.nth(1).click() 
+        else: btns.first.click()
+
+        # 완료 팝업 -> OK
+        handle_popup(page, timeout=20000)
+        
+        page.reload() # 세션 갱신
+        page.wait_for_selector("#Page200_id", timeout=15000)
+        return True
+    except:
+        return False
+
+def load_default_settings(page: Page, password="qwerty0-"):
+    """기본 설정 불러오기 (초기화)"""
+    try:
+        page.locator("#Page200_id").click()
+        page.locator("#Page201_id").click()
+        page.wait_for_timeout(500)
+        
+        page.locator("#set-default").click()
+
+        # 1. 확인 팝업 (네트워크 유지 체크 해제 -> OK)
+        confirm = page.locator(VISIBLE_DIALOG).filter(has=page.locator("#load-default-setup-diag"))
+        confirm.wait_for(state="visible")
+        
+        chk = confirm.locator("#include-network-setup")
+        if chk.is_visible() and chk.is_checked(): chk.uncheck()
+        
+        confirm.locator(DIALOG_BUTTONS).first.click()
+
+        # 2. Warning -> OK
+        handle_popup(page)
+
+        # 3. 비밀번호 재설정
+        edit_user = page.locator(VISIBLE_DIALOG).filter(has=page.locator("#edit-user-diag"))
+        edit_user.wait_for(state="visible")
+        edit_user.locator("#edit-user-edit-passwd1").fill(password)
+        edit_user.locator("#edit-user-edit-passwd2").fill(password)
+        
+        edit_user.locator("#edit-email_not_use").check()
+        
+        # 4. 이메일 경고 -> OK
+        try:
+            if page.locator(VISIBLE_DIALOG).count() > 1:
+                page.locator(VISIBLE_DIALOG).last.locator(DIALOG_BUTTONS).first.click()
+        except: pass
+
+        # 5. 비밀번호 설정 완료 -> OK
+        edit_user.locator(DIALOG_BUTTONS).first.click()
+
+        # 6. 최종 완료 -> OK
+        handle_popup(page, timeout=15000)
+
+        page.reload() # 세션 갱신
+        page.wait_for_selector("#Page200_id", timeout=15000)
+        return True
+    except:
+        return False
+
+# ===========================================================
+# ⚙️ [테스트 케이스]
+# ===========================================================
+
+def run_default_setup_test(page: Page, camera_ip: str):
+    print("\n---기본 설정(초기화) 및 복구 테스트 ---")
+    try:
+        # 1. 오염
+        if not ui_set_note(page, "DIRTY_BEFORE_RESET"): raise Exception("설정 변경 실패")
+        # 2. 백업
+        if not export_settings(page, "backup.dat"): raise Exception("백업 실패")
+        # 3. 초기화
+        if not load_default_settings(page): raise Exception("초기화 실패")
+        
+        # 4. 초기화 검증
+        val = api_get_note(page, camera_ip)
+        if val != "": raise Exception(f"초기화 안됨 (값: {val})")
+        
+        # 5. 복구
+        if not import_settings(page, "backup.dat"): raise Exception("복구 실패")
+        
+        # 6. 복구 검증
+        val = api_get_note(page, camera_ip)
+        if val != "DIRTY_BEFORE_RESET": raise Exception(f"복구 안됨 (값: {val})")
+        
+        return True, "초기화 및 복구 성공"
     except Exception as e:
-        print(f"🔥 [TC 1] 테스트 중 심각한 오류 발생: {e}")
         return False, str(e)
 
-# -----------------------------------------------------------
-# ⚙️ 테스트 케이스 2: 기본 설정 불러오기 및 복구 테스트
-# -----------------------------------------------------------
-def run_default_setup_test(page: Page, camera_ip: str):
-    """
-    1. 설정 변경 (오염)
-    2. 변경된 설정 백업 (내보내기)
-    3. 기본 설정 불러오기 (초기화) -> 초기화 되었는지 API 검증
-    4. 백업 파일 불러오기 (복구) -> 복구 되었는지 API 검증
-    """
-    
-    BACKUP_FILE = "backup_before_reset.dat"
-    TEST_VALUE_BEFORE_RESET = "SETUP_TO_BE_RESET_123" 
-    DEFAULT_NOTE_VALUE = "" 
-    RESET_PASSWORD = "qwerty0-" # 대문자/소문자/숫자/특수문자 포함 8자 이상
-    
-    print("\n--- [TC 3] 기본 설정 불러오기 및 복구 테스트 시작 ---")
-    
+def run_setup_roundtrip_test(page: Page, camera_ip: str):
+    print("\n---설정 내보내기/불러오기 테스트 ---")
     try:
-        # 1. [준비] 설정을 특정한 값으로 변경 (오염)
-        print("[TC 3.1] 테스트를 위해 '설명' 값을 변경합니다...")
-        if not ui_set_note(page, TEST_VALUE_BEFORE_RESET):
-            raise Exception("초기 설정 변경 실패")
-            
-        # 2. [백업] 현재 상태(오염된 상태)를 파일로 저장
-        print(f"[TC 3.2] 현재 설정('{TEST_VALUE_BEFORE_RESET}')을 백업합니다...")
-        success, msg = export_and_verify_settings(page, BACKUP_FILE)
-        if not success:
-            raise Exception(f"설정 백업 실패: {msg}")
-        print(f"✅ [TC 3.2] 백업 완료: {BACKUP_FILE}")
+        # 1. 테스트값 설정
+        if not ui_set_note(page, "TEST_VALUE_123"): raise Exception("설정 실패")
+        # 2. 내보내기
+        if not export_settings(page, "test_conf.dat"): raise Exception("내보내기 실패")
+        # 3. 값 오염
+        if not ui_set_note(page, "TRASH_VALUE"): raise Exception("오염 실패")
+        # 4. 불러오기
+        if not import_settings(page, "test_conf.dat"): raise Exception("불러오기 실패")
+        # 5. 검증
+        val = api_get_note(page, camera_ip)
+        if val != "TEST_VALUE_123": raise Exception(f"검증 실패 (값: {val})")
         
-        # 3. [초기화] 기본 설정 불러오기 실행
-        print("[TC 3.3] '기본 설정 불러오기'를 실행합니다...")
-        if not load_default_settings(page, RESET_PASSWORD): # 👈 비밀번호 전달
-            raise Exception("기본 설정 불러오기 동작 실패")
-            
-        # 4. [검증 1] 정말로 초기화 되었는지 API로 확인
-        print("[TC 3.4] API로 초기화 여부('설명' 필드 공란) 확인...")
-        current_note = api_get_note(page, camera_ip)
-        
-        if current_note == DEFAULT_NOTE_VALUE:
-            print(f"✅ [TC 3.4] 초기화 검증 성공! (현재 값: '{current_note}')")
-        else:
-            raise Exception(f"초기화 검증 실패! (예상: 공란, 실제: '{current_note}')")
-            
-        # 5. [복구] 아까 백업해둔 파일 불러오기
-        print(f"[TC 3.5] 백업 파일('{BACKUP_FILE}')로 설정을 복구합니다...")
-        success, msg = import_settings_and_reboot(page, BACKUP_FILE)
-        if not success:
-            raise Exception(f"설정 복구 실패: {msg}")
-            
-        # 6. [검증 2] 복구가 제대로 되었는지 API로 확인
-        print("[TC 3.6] API로 설정 복구 여부 확인...")
-        final_note = api_get_note(page, camera_ip)
-        
-        if final_note == TEST_VALUE_BEFORE_RESET:
-            print(f"✅ [TC 3.6] 복구 검증 성공! ('{TEST_VALUE_BEFORE_RESET}' 로 복원됨)")
-            return True, "기본 설정 및 복구 테스트 성공"
-        else:
-            return False, f"복구 값 불일치 (예상: {TEST_VALUE_BEFORE_RESET}, 실제: {final_note})"
-
+        return True, "Round-Trip 성공"
     except Exception as e:
-        print(f"🔥 [TC 3] 테스트 중 오류 발생: {e}")
         return False, str(e)
