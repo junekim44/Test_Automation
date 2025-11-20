@@ -14,17 +14,18 @@ MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System"
 SETUP_WINDOW_TITLE = "IDIS Center 설정"
 MODIFY_WINDOW_TITLE = "장치 수정"
 
-# 테스트 대상 정보
+# 테스트 정보
 TARGET_DEVICE = "105_T6831"
 USER_ID = "admin123"
 USER_PW = "qwerty0-"
 
 # 🖱️ [좌표 설정] 우클릭 지점 기준 상대 좌표 (X, Y)
 COORD_DEVICE_MODIFY = (50, 20)  # 장치 수정
+COORD_REMOTE_SETUP = (50, 45)   # 원격 설정 (장치 수정 1칸 아래)
 COORD_FW_UPGRADE = (50, 70)     # 펌웨어 업그레이드 (장치 수정 2칸 아래)
 
 # ---------------------------------------------------------
-# 🛠️ [UIA] 공통 유틸리티 함수
+# 🛠️ [UIA] 유틸리티 함수
 # ---------------------------------------------------------
 def uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
     try:
@@ -92,7 +93,6 @@ def get_window_handle(window_name):
         except: pass
     return hwnd
 
-    
 # ---------------------------------------------------------
 # 🚀 메인 실행 로직
 # ---------------------------------------------------------
@@ -120,7 +120,7 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     if not uia_type_text(setup_hwnd, "101", device_name_to_search): return False
     time.sleep(2)
 
-    # 3. 장치 수정 진입
+    # 3. 장치 수정 진입 (로그인용)
     print(f"   [iRAS] 우클릭 -> 장치 수정...")
     if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
         click_relative_mouse(*COORD_DEVICE_MODIFY) 
@@ -138,27 +138,22 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     uia_type_text(modify_hwnd, "22043", user_id) 
     uia_type_text(modify_hwnd, "22045", user_pw) 
 
-    print("   [iRAS] 연결 테스트 버튼 클릭...")
-    # '22132'는 연결 테스트 버튼의 AutomationId
+    # 5. 연결 테스트
+    print("   [iRAS] 연결 테스트 수행...")
     if uia_click_element(modify_hwnd, "22132"):
-        print("   [Wait] 테스트 수행 중 (3초 대기)...")
         time.sleep(3.0) 
-        
-        print("   [iRAS] 결과 팝업 닫기 (Enter)")
-        send_native_keys("{ENTER}")
+        send_native_keys("{ENTER}") 
         time.sleep(1.0)
-    else:
-        print("⚠️ 연결 테스트 버튼을 찾지 못했습니다.")
 
-    # 5. 저장 및 닫기
+    # 6. 저장 및 닫기
     print("   [iRAS] 정보 저장 (창 닫기)...")
     uia_click_element(modify_hwnd, "1") 
     time.sleep(2.0) 
 
     # -------------------------------------------------------------
-    # 🧪 [권한 테스트] 펌웨어 업그레이드
+    # 🧪 [권한 테스트 1] 펌웨어 업그레이드
     # -------------------------------------------------------------
-    print("\n   🧪 [권한 테스트] 펌웨어 업그레이드 접근 시도...")
+    print("\n   🧪 [권한 테스트 1/2] 펌웨어 업그레이드 시도...")
     
     if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
         print(f"   [iRAS] 펌웨어 업그레이드({COORD_FW_UPGRADE}) 클릭...")
@@ -173,7 +168,24 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     else:
         return False
 
-    # 6. 설정 창 종료
+    # -------------------------------------------------------------
+    # 🧪 [권한 테스트 2] 원격 설정 (자동 닫힘 확인)
+    # -------------------------------------------------------------
+    print("\n   🧪 [권한 테스트 2/2] 원격 설정 시도...")
+    
+    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
+        print(f"   [iRAS] 원격 설정({COORD_REMOTE_SETUP}) 클릭...")
+        click_relative_mouse(*COORD_REMOTE_SETUP) # (50, 45)
+        
+        # 7초 자동 닫힘이므로 8초 대기
+        print("   [Wait] 팝업 자동 닫힘 대기 (8초)...")
+        time.sleep(8.0)
+        
+        print("   ✅ 대기 완료 (팝업 사라짐 확인)")
+    else:
+        return False
+
+    # 7. 설정 창 종료
     if setup_hwnd:
         print("   [iRAS] 설정 창 종료...")
         uia_click_element(setup_hwnd, "1")
@@ -181,7 +193,6 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     print("\n✅ iRAS 단독 테스트 완료.")
     return True
 
-# 단독 실행용
 if __name__ == "__main__":
     try: subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
     except: pass
