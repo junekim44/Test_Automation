@@ -4,7 +4,7 @@ import win32gui
 import win32com.client
 import win32api
 import win32con
-import uiautomation as auto  # pip install uiautomation
+import uiautomation as auto
 
 # ---------------------------------------------------------
 # [설정 및 상수 정의]
@@ -12,177 +12,186 @@ import uiautomation as auto  # pip install uiautomation
 WAD_PATH = r"C:\Program Files (x86)\Windows Application Driver\WinAppDriver.exe"
 MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System"
 SETUP_WINDOW_TITLE = "IDIS Center 설정"
+MODIFY_WINDOW_TITLE = "장치 수정"
+
 TARGET_DEVICE = "105_T6831"
-CONTEXT_MENU_ITEM = "장치 수정..." # ⚠️ 정확한 텍스트여야 함 (점 3개 확인)
+TARGET_ID = "admin123"
+TARGET_PW = "qwerty0-"
 
 # ---------------------------------------------------------
-# 🛠️ [핵심] UIAutomation 기반 제어 함수
+# 🛠️ [UIA] 핵심 함수
 # ---------------------------------------------------------
 def uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
-    """
-    요소(ID)를 찾아 클릭합니다.
-    :param y_offset: None이면 '정중앙', 숫자면 '상단 + offset'
-    """
+    """ 요소 ID로 클릭 """
     try:
-        print(f"   [UIA] 핸들({hex(window_handle)})에서 요소(ID:{automation_id}) 탐색 중...")
-        
+        print(f"   [UIA] 요소(ID:{automation_id}) 탐색...")
         window = auto.ControlFromHandle(window_handle)
         target_elem = window.Control(AutomationId=automation_id)
         
         if not target_elem.Exists(maxSearchSeconds=3):
-            print(f"❌ [UIA] 요소(ID:{automation_id})를 찾을 수 없습니다.")
+            print(f"❌ 요소(ID:{automation_id}) 찾기 실패")
             return False
             
         rect = target_elem.BoundingRectangle
-        
         click_x = int((rect.left + rect.right) / 2)
-        if y_offset is None:
-            click_y = int((rect.top + rect.bottom) / 2)
-        else:
-            click_y = int(rect.top + y_offset)
+        click_y = int((rect.top + rect.bottom) / 2) if y_offset is None else int(rect.top + y_offset)
             
         win32api.SetCursorPos((click_x, click_y))
         time.sleep(0.3)
-        
-        if is_right_click:
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, click_x, click_y, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, click_x, click_y, 0, 0)
-            print("   [UIA] 우클릭 완료")
-        else:
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, click_x, click_y, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, click_x, click_y, 0, 0)
-            print("   [UIA] 좌클릭 완료")
+        flags = win32con.MOUSEEVENTF_RIGHTDOWN | win32con.MOUSEEVENTF_RIGHTUP if is_right_click else win32con.MOUSEEVENTF_LEFTDOWN | win32con.MOUSEEVENTF_LEFTUP
+        win32api.mouse_event(flags, click_x, click_y, 0, 0)
+        print("   ✅ 클릭 완료")
         return True
     except Exception as e:
-        print(f"🔥 [UIA] 클릭 제어 실패: {e}")
+        print(f"🔥 클릭 실패: {e}")
         return False
 
 def uia_type_text(window_handle, automation_id, text):
-    """입력창 중앙 클릭 후 텍스트 입력"""
+    """ 입력창 클릭 후 텍스트 입력 """
     try:
-        if uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
+        if uia_click_element(window_handle, automation_id):
             time.sleep(0.5)
-            send_native_keys("^a{BACKSPACE}")
+            send_native_keys("^a{BACKSPACE}") 
             time.sleep(0.2)
             send_native_keys(text)
             return True
         return False
-    except Exception as e:
-        print(f"🔥 [UIA] 텍스트 입력 실패: {e}")
-        return False
+    except: return False
 
-def click_relative_from_current_pos(dx, dy):
-    """
-    현재 마우스 위치에서 가로(dx), 세로(dy)만큼 이동하여 좌클릭합니다.
-    예: dx=20, dy=20 이면 오른쪽 아래 대각선으로 살짝 이동
-    """
+def uia_click_network_tab_offset(window_handle):
+    """ 첫 번째 탭(정보)을 기준으로 오른쪽으로 이동하여 클릭 """
     try:
-        # 1. 현재 마우스 좌표 가져오기 (우클릭 직후의 위치)
-        current_x, current_y = win32api.GetCursorPos()
+        print("   [Offset] 탭 위치 계산 중...")
+        window = auto.ControlFromHandle(window_handle)
+        first_tab = window.TabItemControl()
         
-        target_x = current_x + dx
-        target_y = current_y + dy
+        if not first_tab.Exists(maxSearchSeconds=2):
+            return False
+            
+        rect = first_tab.BoundingRectangle
+        tab_width = rect.right - rect.left
         
-        print(f"   [Mouse] 현재({current_x}, {current_y}) -> 이동({target_x}, {target_y})")
+        # 정보 탭 중앙
+        center_x = int((rect.left + rect.right) / 2)
+        center_y = int((rect.top + rect.bottom) / 2)
         
-        # 2. 마우스 이동 (부드럽게 보이기 위해 sleep 약간 추가 가능)
-        win32api.SetCursorPos((target_x, target_y))
-        time.sleep(0.5) # 이동 확인용 대기
+        # 네트워크 탭 위치 (오른쪽으로 탭 너비만큼 이동)
+        target_x = center_x + tab_width + 5
         
-        # 3. 좌클릭
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, target_x, target_y, 0, 0)
+        win32api.SetCursorPos((target_x, center_y))
+        time.sleep(0.3)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, target_x, center_y, 0, 0)
         time.sleep(0.1)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, target_x, target_y, 0, 0)
-        print("   [Mouse] 상대 좌표 클릭 완료")
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, target_x, center_y, 0, 0)
+        print("   ✅ 탭 클릭 완료 (Offset 방식)")
         return True
-        
-    except Exception as e:
-        print(f"🔥 마우스 이동 실패: {e}")
-        return False
-
+    except: return False
 
 # ---------------------------------------------------------
-# 🛠️ Windows API 헬퍼
+# 🛠️ 헬퍼 함수
 # ---------------------------------------------------------
 def send_native_keys(keys):
-    shell = win32com.client.Dispatch("WScript.Shell")
-    shell.SendKeys(keys)
+    win32com.client.Dispatch("WScript.Shell").SendKeys(keys)
+
+def click_relative_mouse(dx, dy):
+    cx, cy = win32api.GetCursorPos()
+    win32api.SetCursorPos((cx + dx, cy + dy))
+    time.sleep(0.2)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN | win32con.MOUSEEVENTF_LEFTUP, cx + dx, cy + dy, 0, 0)
 
 def get_window_handle(window_name):
-    print(f"[System] '{window_name}' 창 검색...")
     hwnd = win32gui.FindWindow(None, window_name)
     if not hwnd:
         def callback(h, _):
-            if win32gui.IsWindowVisible(h):
-                t = win32gui.GetWindowText(h)
-                if window_name in t:
-                    nonlocal hwnd
-                    hwnd = h
-                    return False
+            if win32gui.IsWindowVisible(h) and window_name in win32gui.GetWindowText(h):
+                nonlocal hwnd; hwnd = h; return False
             return True
         try: win32gui.EnumWindows(callback, None)
         except: pass
-
     if hwnd:
         try:
             if win32gui.IsIconic(hwnd): win32gui.ShowWindow(hwnd, 9)
             win32gui.SetForegroundWindow(hwnd)
         except: pass
-        print(f"✅ 창 핸들 획득: {hex(hwnd)}")
-        return hwnd
-    else:
-        print(f"❌ '{window_name}' 창을 찾을 수 없습니다.")
-        return None
+    return hwnd
 
 # ---------------------------------------------------------
 # 🚀 메인 실행 로직
 # ---------------------------------------------------------
 def run_iras_automation():
-    # 1. WinAppDriver (필요 시)
-    try: subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
-    except: pass
-    time.sleep(2)
-
-    # [Step 1] 메인 화면 진입
+    # [Step 1] 메인 -> 설정
     main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
-    if not main_hwnd: return
-    try:
-        send_native_keys("%s") 
-        time.sleep(0.5); send_native_keys("i")
-        time.sleep(0.5); send_native_keys("{ENTER}"); time.sleep(0.5); send_native_keys("{ENTER}")
-    except: pass
+    if main_hwnd:
+        print("[Step 1] 설정 진입...")
+        send_native_keys("%s"); time.sleep(0.5)
+        send_native_keys("i"); time.sleep(0.5)
+        send_native_keys("{ENTER}"); time.sleep(0.5)
+        send_native_keys("{ENTER}")
+    
+    time.sleep(3)
 
-    print("[System] 팝업 대기 (3초)...")
-    time.sleep(3) 
-
-    # [Step 2] 설정 팝업 핸들
+    # [Step 2] 설정 핸들
     setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
     if not setup_hwnd: return
 
-    # [Step 3] 검색창 입력
-    print(f"\n[Step 3] 검색창 입력...")
+    # [Step 3] 장치 검색
+    print(f"\n[Step 3] 장치 검색: {TARGET_DEVICE}")
     if not uia_type_text(setup_hwnd, "101", TARGET_DEVICE): return
-    time.sleep(2) 
+    time.sleep(2)
 
-    # [Step 4] 리스트 우클릭
-    print(f"\n[Step 4] 장치 리스트 우클릭...")
-    if not uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        return
-    
-    time.sleep(1.0) # 메뉴 뜨는 시간 대기
+    # [Step 4] 우클릭
+    print(f"\n[Step 4] 우클릭...")
+    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
+        # [Step 5] 메뉴 선택
+        print(f"\n[Step 5] 장치 수정 선택...")
+        click_relative_mouse(50, 20)
+    else: return
 
-    # [Step 5] 마우스 위치 살짝 옮겨서 첫 번째 항목 클릭
-    print(f"\n[Step 5] 마우스를 살짝 옮겨서 '장치 수정' 클릭...")
-    
-    # 오른쪽(x)으로 30픽셀, 아래(y)로 30픽셀 이동 후 클릭
-    # 만약 클릭 위치가 빗나가면 이 숫자를 조절하세요 (예: 20, 20)
-    click_relative_from_current_pos(50, 20)
-    
-    print("🎉 클릭 동작 완료 (장치 수정 창 확인)")
-    
-    print("🎉 완료")
+    print("[System] 팝업 대기 (2초)...")
+    time.sleep(2)
+
+    # [Step 6] 수정 창 제어
+    modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
+    if modify_hwnd:
+        print(f"\n[Step 6] 정보 수정 시작...")
+
+        # 1. 탭 이동
+        if uia_click_network_tab_offset(modify_hwnd):
+            time.sleep(1.0) 
+            
+            # 2. 아이디/비번 입력
+            print("   -> 아이디 입력")
+            uia_type_text(modify_hwnd, "22043", TARGET_ID)
+            
+            print("   -> 비밀번호 입력")
+            uia_type_text(modify_hwnd, "22045", TARGET_PW)
+            
+            # 3. 연결 테스트 (ID: 22132)
+            print("\n[Step 7] 연결 테스트 진행...")
+            if uia_click_element(modify_hwnd, "22132"):
+                print("   -> 테스트 중... (3초 대기)")
+                time.sleep(3.0) # 네트워크 테스트 시간 고려
+                
+                print("   -> 결과 팝업 닫기 (Enter)")
+                send_native_keys("{ENTER}")
+                time.sleep(1.0)
+            
+            # 4. 장치 수정 창 닫기 (ID: 1 - 확인 버튼)
+            print("\n[Step 8] 장치 수정 완료 (확인 버튼 클릭)...")
+            uia_click_element(modify_hwnd, "1")
+            
+            time.sleep(1.5) # 창 닫히는 시간 대기
+
+            # 5. 설정 창 닫기 (ID: 1 - 확인 버튼)
+            # 주의: 이제 modify_hwnd는 사라졌으므로 setup_hwnd를 사용해야 함
+            print("\n[Step 9] 설정 저장 및 종료...")
+            uia_click_element(setup_hwnd, "1")
+            
+            print("\n🎉 모든 자동화 시나리오 성공!")
+        else:
+            print("❌ 탭 클릭 실패")
+    else:
+        print("❌ 수정 창 안 뜸")
 
 if __name__ == "__main__":
     run_iras_automation()
