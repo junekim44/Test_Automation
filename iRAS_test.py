@@ -14,8 +14,17 @@ MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System"
 SETUP_WINDOW_TITLE = "IDIS Center 설정"
 MODIFY_WINDOW_TITLE = "장치 수정"
 
+# 테스트 대상 정보
+TARGET_DEVICE = "105_T6831"
+USER_ID = "admin123"
+USER_PW = "qwerty0-"
+
+# 🖱️ [좌표 설정] 우클릭 지점 기준 상대 좌표 (X, Y)
+COORD_DEVICE_MODIFY = (50, 20)  # 장치 수정
+COORD_FW_UPGRADE = (50, 70)     # 펌웨어 업그레이드 (장치 수정 2칸 아래)
+
 # ---------------------------------------------------------
-# 🛠️ [UIA] 공통 함수 (기존과 동일)
+# 🛠️ [UIA] 공통 유틸리티 함수
 # ---------------------------------------------------------
 def uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
     try:
@@ -62,9 +71,10 @@ def send_native_keys(keys):
 
 def click_relative_mouse(dx, dy):
     cx, cy = win32api.GetCursorPos()
-    win32api.SetCursorPos((cx + dx, cy + dy))
+    tx, ty = cx + dx, cy + dy
+    win32api.SetCursorPos((tx, ty))
     time.sleep(0.2)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN | win32con.MOUSEEVENTF_LEFTUP, cx + dx, cy + dy, 0, 0)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN | win32con.MOUSEEVENTF_LEFTUP, tx, ty, 0, 0)
 
 def get_window_handle(window_name):
     hwnd = win32gui.FindWindow(None, window_name)
@@ -82,25 +92,18 @@ def get_window_handle(window_name):
         except: pass
     return hwnd
 
+    
 # ---------------------------------------------------------
-# 🚀 [핵심] 외부에서 호출할 실행 함수
+# 🚀 메인 실행 로직
 # ---------------------------------------------------------
 def run_iras_permission_check(device_name_to_search, user_id, user_pw):
-    """
-    UserGroupTest에서 호출하는 함수.
-    생성된 ID/PW를 받아 iRAS에서 로그인 및 권한 동작을 수행함.
-    """
-    print(f"\n🖥️ [iRAS] 데스크톱 자동화 시작 (ID: {user_id})...")
+    print(f"\n🖥️ [iRAS] 단독 테스트 시작 (ID: {user_id})...")
 
-    # 1. WinAppDriver 실행 (옵션)
-    try: subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
-    except: pass
-    time.sleep(2)
-
-    # 2. iRAS 메인 -> 설정 진입
+    # 1. 설정 진입
     main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
-    if not main_hwnd:
-        return False, "iRAS 메인 창을 찾을 수 없음"
+    if not main_hwnd: 
+        print("❌ iRAS 메인 창을 찾을 수 없습니다.")
+        return False
 
     print("   [iRAS] 설정 메뉴 진입...")
     send_native_keys("%s"); time.sleep(0.5)
@@ -110,53 +113,78 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     time.sleep(3)
 
     setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-    if not setup_hwnd: return False, "설정 창 진입 실패"
+    if not setup_hwnd: return False
 
-    # 3. 장치 검색
+    # 2. 장치 검색
     print(f"   [iRAS] 장치 검색: {device_name_to_search}")
-    if not uia_type_text(setup_hwnd, "101", device_name_to_search): return False, "검색창 입력 실패"
+    if not uia_type_text(setup_hwnd, "101", device_name_to_search): return False
     time.sleep(2)
 
-    # 4. 우클릭 -> 장치 수정
+    # 3. 장치 수정 진입
+    print(f"   [iRAS] 우클릭 -> 장치 수정...")
     if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        print("   [iRAS] 메뉴 진입 (상대 좌표)...")
-        click_relative_mouse(50, 20) # 장치 수정 클릭
-    else: return False, "리스트 우클릭 실패"
+        click_relative_mouse(*COORD_DEVICE_MODIFY) 
+    else: return False
 
     time.sleep(2)
     modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
-    if not modify_hwnd: return False, "장치 수정 팝업 안 뜸"
+    if not modify_hwnd: return False
 
-    # 5. 정보 수정 (ID/PW 입력)
-    print("   [iRAS] 아이디/비번 입력 중...")
-    if not uia_click_network_tab_offset(modify_hwnd): return False, "탭 전환 실패"
+    # 4. 정보 수정 (ID/PW 입력)
+    print("   [iRAS] 계정 정보 입력...")
+    if not uia_click_network_tab_offset(modify_hwnd): return False
     time.sleep(1.0)
 
-    uia_type_text(modify_hwnd, "22043", user_id) # 아이디 입력
-    uia_type_text(modify_hwnd, "22045", user_pw) # 비번 입력
-    
-    # -------------------------------------------------------------
-    # 🧪 [추가 동작] 권한 테스트 로직이 들어갈 자리
-    # -------------------------------------------------------------
-    print("\n   🧪 [iRAS] 권한 동작 테스트 수행...")
-    
-    # 예: 연결 테스트 버튼 누르기
-    print("   -> 연결 테스트 시도...")
-    if uia_click_element(modify_hwnd, "22132"):
-        time.sleep(3.0)
-        send_native_keys("{ENTER}") # 결과 팝업 닫기
-    
-    # TODO: 여기에 추가하고 싶은 동작(권한 확인 등)을 더 넣으세요.
-    # 예: 특정 버튼이 비활성화 되어 있는지 확인 등...
-    
-    # 6. 마무리 (창 닫기)
-    print("   [iRAS] 창 닫기 및 종료...")
-    uia_click_element(modify_hwnd, "1") # 수정 창 확인(닫기)
-    time.sleep(1.5)
-    
-    # 설정 창 닫기 (setup_hwnd 핸들이 유효한지 확인 필요하므로 다시 찾음)
-    setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-    if setup_hwnd:
-        uia_click_element(setup_hwnd, "1") # 설정 창 확인(닫기)
+    uia_type_text(modify_hwnd, "22043", user_id) 
+    uia_type_text(modify_hwnd, "22045", user_pw) 
 
-    return True, "iRAS 자동화 테스트 완료"
+    print("   [iRAS] 연결 테스트 버튼 클릭...")
+    # '22132'는 연결 테스트 버튼의 AutomationId
+    if uia_click_element(modify_hwnd, "22132"):
+        print("   [Wait] 테스트 수행 중 (3초 대기)...")
+        time.sleep(3.0) 
+        
+        print("   [iRAS] 결과 팝업 닫기 (Enter)")
+        send_native_keys("{ENTER}")
+        time.sleep(1.0)
+    else:
+        print("⚠️ 연결 테스트 버튼을 찾지 못했습니다.")
+
+    # 5. 저장 및 닫기
+    print("   [iRAS] 정보 저장 (창 닫기)...")
+    uia_click_element(modify_hwnd, "1") 
+    time.sleep(2.0) 
+
+    # -------------------------------------------------------------
+    # 🧪 [권한 테스트] 펌웨어 업그레이드
+    # -------------------------------------------------------------
+    print("\n   🧪 [권한 테스트] 펌웨어 업그레이드 접근 시도...")
+    
+    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
+        print(f"   [iRAS] 펌웨어 업그레이드({COORD_FW_UPGRADE}) 클릭...")
+        click_relative_mouse(*COORD_FW_UPGRADE)
+        
+        print("   [Wait] 권한 거부 팝업 대기 (2초)...")
+        time.sleep(2.0)
+        
+        print("   [iRAS] 팝업 닫기 (Enter)")
+        send_native_keys("{ENTER}")
+        time.sleep(1.0)
+    else:
+        return False
+
+    # 6. 설정 창 종료
+    if setup_hwnd:
+        print("   [iRAS] 설정 창 종료...")
+        uia_click_element(setup_hwnd, "1")
+
+    print("\n✅ iRAS 단독 테스트 완료.")
+    return True
+
+# 단독 실행용
+if __name__ == "__main__":
+    try: subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    except: pass
+    time.sleep(2)
+
+    run_iras_permission_check(TARGET_DEVICE, USER_ID, USER_PW)
