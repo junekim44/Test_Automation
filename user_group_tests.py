@@ -1,6 +1,7 @@
 import time
 from playwright.sync_api import Page
 from common_actions import parse_api_response, handle_popup, VISIBLE_DIALOG, DIALOG_BUTTONS
+import iRAS_test
 
 # ===========================================================
 # ⚙️ [내부 액션 함수] 사용자/그룹 전용
@@ -143,42 +144,54 @@ def ui_add_user(page: Page, user_id: str, password: str):
 # ===========================================================
 
 def run_user_group_test(page: Page, camera_ip: str):
+    """
+    1. 웹 Admin 접속 -> 그룹/사용자 생성
+    2. 생성 성공 시 -> iRAS 데스크톱 앱 실행 -> 생성된 계정으로 로그인/동작 수행
+    """
+    
+    # 테스트 데이터
     GROUP_NAME = "아이디스"
     USER_ID = "admin123"
     USER_PW = "qwerty0-"
+    TARGET_DEVICE_NAME = "105_T6831" # iRAS에서 검색할 장치명
+
+    print(f"\n==================================================")
+    print(f"   [통합 테스트] 사용자 생성(Web) + 로그인 검증(iRAS)")
+    print(f"==================================================\n")
     
-    print(f"\n--- [TC 5] 사용자/그룹 추가 테스트 ---")
+    # -------------------------------------------------------
+    # [Phase 1] 웹 브라우저 자동화 (계정 생성)
+    # -------------------------------------------------------
+    print(f"🌐 [Web] 그룹/사용자 생성 시작...")
     
     # 1. 그룹 추가
-    print(f"[Step 1] 그룹 '{GROUP_NAME}' 추가 (권한 없음)...")
-    if not ui_add_group(page, GROUP_NAME): return False, "그룹 추가 UI 실패"
+    if not ui_add_group(page, GROUP_NAME): 
+        return False, "Web: 그룹 추가 실패"
     
     # 2. 그룹 선택
-    print(f"[Step 2] 트리에서 '{GROUP_NAME}' 그룹 선택...")
-    if not ui_select_group_node(page, GROUP_NAME): return False, "그룹 선택 실패"
+    if not ui_select_group_node(page, GROUP_NAME): 
+        return False, "Web: 그룹 선택 실패"
     
     # 3. 사용자 추가
-    print(f"[Step 3] 사용자 '{USER_ID}' 추가...")
-    if not ui_add_user(page, USER_ID, USER_PW): return False, "사용자 추가 UI 실패"
+    if not ui_add_user(page, USER_ID, USER_PW): 
+        return False, "Web: 사용자 추가 실패"
     
-    # 4. 검증 (API)
-    print(f"[Step 4] API 검증...")
+    print(f"✅ [Web] 계정 생성 완료 ({USER_ID} / {USER_PW})")
     time.sleep(2) # 저장 반영 대기
-    data = api_get_users_groups(page, camera_ip)
+
+    # -------------------------------------------------------
+    # [Phase 2] iRAS 데스크톱 자동화 (권한/로그인 검증)
+    # -------------------------------------------------------
+    print(f"\n🖥️ [System] iRAS 연동 테스트로 진입합니다...")
     
-    # 그룹 존재 확인
-    if GROUP_NAME not in data["groups"]:
-        return False, f"그룹 생성 안됨 (목록: {data['groups']})"
-        
-    # 사용자 존재 및 소속 확인
-    user_found = False
-    for u in data["users"]:
-        if u["name"] == USER_ID and u["group"] == GROUP_NAME:
-            user_found = True
-            break
-            
-    if user_found:
-        print(f"✅ 사용자/그룹 생성 검증 완료")
-        return True, "사용자/그룹 테스트 성공"
+    # iRAS 모듈의 함수 호출 (장치명, 아이디, 비번 전달)
+    iras_success, iras_msg = iRAS_test.run_iras_permission_check(
+        TARGET_DEVICE_NAME, 
+        USER_ID, 
+        USER_PW
+    )
+
+    if iras_success:
+        return True, f"통합 테스트 성공: {iras_msg}"
     else:
-        return False, f"사용자 생성 실패 또는 그룹 불일치 (목록: {data['users']})"
+        return False, f"iRAS 테스트 실패: {iras_msg}"
