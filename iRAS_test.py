@@ -25,6 +25,7 @@ COORD_DEVICE_MODIFY = (50, 20)
 COORD_REMOTE_SETUP = (50, 45)
 COORD_FW_UPGRADE = (50, 70)
 COORD_COLOR_CONTROL = (50, 175) # 색상 제어 (8번째 메뉴)
+COORD_PTZ_CONTROL = (50, 125)
 
 # 🎯 [핵심] 감시 화면 AutomationID
 SURVEILLANCE_SCREEN_ID = "59648"
@@ -240,15 +241,35 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     # =============================================================
     # 🧪 [권한 테스트 3] 감시 화면 색상 제어 (AutomationId 사용)
     # =============================================================
-    print("\n   🧪 [권한 테스트 3/3] 감시 화면 색상 제어...")
+    # print("\n   🧪 [권한 테스트 3/3] 감시 화면 색상 제어...")
     
-    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
-    if not main_hwnd: return False
+    # main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
+    # if not main_hwnd: return False
     
-    # 수정된 탐색 함수 호출 (AutomationId 사용)
+    # # 수정된 탐색 함수 호출 (AutomationId 사용)
+    # if right_click_surveillance_screen(main_hwnd):
+    #     print(f"   [iRAS] 색상 제어({COORD_COLOR_CONTROL}) 클릭...")
+    #     click_relative_mouse(*COORD_COLOR_CONTROL)
+        
+    #     print("   [Wait] 권한 거부 팝업 대기 (3초)...")
+    #     time.sleep(3.0)
+        
+    #     print("   [iRAS] 팝업 닫기 (Enter)")
+    #     send_native_keys("{ENTER}")
+    #     time.sleep(1.0)
+        
+    # else:
+    #     print("❌ 감시 화면을 찾지 못해 테스트 실패")
+    #     return False
+    
+    # -------------------------------------------------
+    # 4. PTZ 제어 (추가됨)
+    # -------------------------------------------------
+    print("\n   🧪 [권한 테스트 4/4] PTZ 제어...")
+    # 다시 우클릭
     if right_click_surveillance_screen(main_hwnd):
-        print(f"   [iRAS] 색상 제어({COORD_COLOR_CONTROL}) 클릭...")
-        click_relative_mouse(*COORD_COLOR_CONTROL)
+        print(f"   [iRAS] PTZ 제어({COORD_PTZ_CONTROL}) 클릭...")
+        click_relative_mouse(*COORD_PTZ_CONTROL) # (50, 125)
         
         print("   [Wait] 권한 거부 팝업 대기 (3초)...")
         time.sleep(3.0)
@@ -256,9 +277,8 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
         print("   [iRAS] 팝업 닫기 (Enter)")
         send_native_keys("{ENTER}")
         time.sleep(1.0)
-        
     else:
-        print("❌ 감시 화면을 찾지 못해 테스트 실패")
+        print("❌ 감시 화면 탐색 실패")
         return False
 
     print("\n✅ iRAS 모든 권한 테스트 완료.")
