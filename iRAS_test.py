@@ -20,14 +20,25 @@ TARGET_DEVICE = "105_T6831"
 USER_ID = "admin123"
 USER_PW = "qwerty0-"
 
-# 🖱️ [좌표 설정]
+# 🖱️ [좌표 설정] (우클릭 지점 기준 상대 좌표)
+# 설정 창 메뉴
 COORD_DEVICE_MODIFY = (50, 20)
 COORD_REMOTE_SETUP = (50, 45)
 COORD_FW_UPGRADE = (50, 70)
-COORD_COLOR_CONTROL = (50, 175) # 색상 제어 (8번째 메뉴)
-COORD_PTZ_CONTROL = (50, 125)
 
-# 🎯 [핵심] 감시 화면 AutomationID
+# 감시 화면 메뉴
+COORD_PTZ_CONTROL = (50, 125)
+COORD_COLOR_CONTROL = (50, 175)
+
+# 알람 아웃 (색상 제어 + 3칸 = 175 + 75 = 250)
+COORD_ALARM_PARENT = (50, 250)
+
+# 알람 아웃 서브메뉴 (부모 메뉴 기준 상대 좌표)
+# 오른쪽으로 150px 이동하여 서브메뉴 진입
+DELTA_ALARM_ON = (150, 0)   # 옆 (사용)
+DELTA_ALARM_OFF = (150, 25) # 옆 -> 아래 (사용 안 함)
+
+# 🎯 감시 화면 ID
 SURVEILLANCE_SCREEN_ID = "59648"
 
 # ---------------------------------------------------------
@@ -88,6 +99,7 @@ def send_native_keys(keys):
     win32com.client.Dispatch("WScript.Shell").SendKeys(keys)
 
 def click_relative_mouse(dx, dy):
+    """현재 마우스 위치 기준 상대 이동 후 클릭"""
     cx, cy = win32api.GetCursorPos()
     tx, ty = cx + dx, cy + dy
     win32api.SetCursorPos((tx, ty))
@@ -113,21 +125,18 @@ def get_window_handle(window_name):
     return hwnd
 
 # ---------------------------------------------------------
-# 🔍 [수정됨] 비디오 패널 찾기 (AutomationId 사용)
+# 🔍 비디오 패널 찾기
 # ---------------------------------------------------------
 def right_click_surveillance_screen(window_handle):
     print(f"   [UIA] 감시 화면(ID: {SURVEILLANCE_SCREEN_ID}) 탐색 중...")
     try:
         window = auto.ControlFromHandle(window_handle)
-        
-        # 🎯 AutomationId로 직접 찾기
         target_pane = window.PaneControl(AutomationId=SURVEILLANCE_SCREEN_ID)
         
         if target_pane.Exists(maxSearchSeconds=3):
             rect = target_pane.BoundingRectangle
             print(f"   ✅ 감시 화면 발견! (Rect: {rect})")
             
-            # 좌표 계산: 중앙 X, 상단 Y (위에서 100px 아래)
             cx = int((rect.left + rect.right) / 2)
             cy = int(rect.top + 100) 
             if cy > rect.bottom: cy = int((rect.top + rect.bottom) / 2)
@@ -136,21 +145,20 @@ def right_click_surveillance_screen(window_handle):
             win32api.SetCursorPos((cx, cy))
             time.sleep(0.5)
             
-            # 포커스 확보 (좌클릭)
+            # 포커스 확보
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             time.sleep(0.05)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             time.sleep(0.2)
             
-            # 우클릭 실행
+            # 우클릭
             win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
             time.sleep(0.1)
             win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             return True
         else:
-            print(f"❌ 감시 화면(ID: {SURVEILLANCE_SCREEN_ID})을 찾을 수 없습니다.")
+            print(f"❌ 감시 화면을 찾을 수 없습니다.")
             return False
-            
     except Exception as e:
         print(f"🔥 화면 탐색 오류: {e}")
         return False
@@ -161,11 +169,11 @@ def right_click_surveillance_screen(window_handle):
 def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     print(f"\n🖥️ [iRAS] 단독 테스트 시작 (ID: {user_id})...")
 
-    # 1. 설정 진입
-    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
-    if not main_hwnd: 
-        print("❌ iRAS 메인 창을 찾을 수 없습니다.")
-        return False
+    # # 1. 설정 진입
+    # main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
+    # if not main_hwnd: 
+    #     print("❌ iRAS 메인 창을 찾을 수 없습니다.")
+    #     return False
 
     # print("   [iRAS] 설정 메뉴 진입...")
     # send_native_keys("%s"); time.sleep(0.5)
@@ -213,11 +221,11 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     # time.sleep(2.0) 
 
     # # =============================================================
-    # # 🧪 [권한 테스트] 설정 창 내부
+    # # 🧪 [권한 테스트 1, 2] 설정 창 내부
     # # =============================================================
     
-    # # 7. 펌웨어 업그레이드
-    # print("\n   🧪 [권한 테스트 1/3] 펌웨어 업그레이드...")
+    # # 펌웨어 업그레이드
+    # print("\n   🧪 [권한 테스트 1/6] 펌웨어 업그레이드...")
     # if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
     #     click_relative_mouse(*COORD_FW_UPGRADE)
     #     time.sleep(2.0)
@@ -225,61 +233,85 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw):
     #     send_native_keys("{ENTER}")
     #     time.sleep(1.0)
 
-    # # 8. 원격 설정
-    # print("\n   🧪 [권한 테스트 2/3] 원격 설정...")
+    # # 원격 설정
+    # print("\n   🧪 [권한 테스트 2/6] 원격 설정...")
     # if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
     #     click_relative_mouse(*COORD_REMOTE_SETUP)
     #     print("   [Wait] 팝업 자동 닫힘 대기 (8초)...")
     #     time.sleep(8.0)
     
-    # # 9. 설정 창 종료
+    # # 설정 창 종료
     # print("   [iRAS] 설정 창 종료...")
     # if setup_hwnd:
     #     uia_click_element(setup_hwnd, "1")
     # time.sleep(3.0) 
 
     # =============================================================
-    # 🧪 [권한 테스트 3] 감시 화면 색상 제어 (AutomationId 사용)
+    # 🧪 [권한 테스트 3~6] 감시 화면 메뉴
     # =============================================================
-    # print("\n   🧪 [권한 테스트 3/3] 감시 화면 색상 제어...")
     
-    # main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
-    # if not main_hwnd: return False
-    
-    # # 수정된 탐색 함수 호출 (AutomationId 사용)
-    # if right_click_surveillance_screen(main_hwnd):
-    #     print(f"   [iRAS] 색상 제어({COORD_COLOR_CONTROL}) 클릭...")
-    #     click_relative_mouse(*COORD_COLOR_CONTROL)
-        
-    #     print("   [Wait] 권한 거부 팝업 대기 (3초)...")
-    #     time.sleep(3.0)
-        
-    #     print("   [iRAS] 팝업 닫기 (Enter)")
-    #     send_native_keys("{ENTER}")
-    #     time.sleep(1.0)
-        
-    # else:
-    #     print("❌ 감시 화면을 찾지 못해 테스트 실패")
-    #     return False
-    
-    # -------------------------------------------------
-    # 4. PTZ 제어 (추가됨)
-    # -------------------------------------------------
-    print("\n   🧪 [권한 테스트 4/4] PTZ 제어...")
-    # 다시 우클릭
+    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
+    if not main_hwnd: return False
+
+    # 3. PTZ 제어
+    print("\n   🧪 [권한 테스트 3/6] PTZ 제어...")
     if right_click_surveillance_screen(main_hwnd):
         print(f"   [iRAS] PTZ 제어({COORD_PTZ_CONTROL}) 클릭...")
-        click_relative_mouse(*COORD_PTZ_CONTROL) # (50, 125)
-        
-        print("   [Wait] 권한 거부 팝업 대기 (3초)...")
+        click_relative_mouse(*COORD_PTZ_CONTROL)
+        print("   [Wait] 팝업 대기 (3초)...")
         time.sleep(3.0)
-        
         print("   [iRAS] 팝업 닫기 (Enter)")
         send_native_keys("{ENTER}")
         time.sleep(1.0)
-    else:
-        print("❌ 감시 화면 탐색 실패")
-        return False
+
+    # 4. 색상 제어
+    print("\n   🧪 [권한 테스트 4/6] 색상 제어...")
+    if right_click_surveillance_screen(main_hwnd):
+        print(f"   [iRAS] 색상 제어({COORD_COLOR_CONTROL}) 클릭...")
+        click_relative_mouse(*COORD_COLOR_CONTROL)
+        print("   [Wait] 팝업 대기 (3초)...")
+        time.sleep(3.0)
+        print("   [iRAS] 팝업 닫기 (Enter)")
+        send_native_keys("{ENTER}")
+        time.sleep(1.0)
+
+    # -------------------------------------------------
+    # 5. 알람 아웃 사용 (서브메뉴)
+    # -------------------------------------------------
+    print("\n   🧪 [권한 테스트 5/6] 알람 아웃 -> 사용 (ON)...")
+    if right_click_surveillance_screen(main_hwnd):
+        # 1) 부모 메뉴로 이동 (클릭으로 서브메뉴 펼침)
+        print(f"   [iRAS] 알람 아웃({COORD_ALARM_PARENT}) 클릭...")
+        click_relative_mouse(*COORD_ALARM_PARENT)
+        time.sleep(0.5)
+        
+        # 2) 서브메뉴 '사용' 클릭 (오른쪽 이동)
+        print(f"   [iRAS] -> 사용({DELTA_ALARM_ON}) 클릭...")
+        click_relative_mouse(*DELTA_ALARM_ON) # 현재 위치 기준 이동
+        
+        print("   [Wait] 팝업 대기 (3초)...")
+        time.sleep(3.0)
+        send_native_keys("{ENTER}")
+        time.sleep(1.0)
+
+    # -------------------------------------------------
+    # 6. 알람 아웃 사용 안 함 (서브메뉴)
+    # -------------------------------------------------
+    print("\n   🧪 [권한 테스트 6/6] 알람 아웃 -> 사용 안 함 (OFF)...")
+    if right_click_surveillance_screen(main_hwnd):
+        # 1) 부모 메뉴로 이동
+        print(f"   [iRAS] 알람 아웃({COORD_ALARM_PARENT}) 클릭...")
+        click_relative_mouse(*COORD_ALARM_PARENT)
+        time.sleep(0.5)
+        
+        # 2) 서브메뉴 '사용 안 함' 클릭 (오른쪽 -> 아래 이동)
+        print(f"   [iRAS] -> 사용 안 함({DELTA_ALARM_OFF}) 클릭...")
+        click_relative_mouse(*DELTA_ALARM_OFF) # 현재 위치 기준 이동
+        
+        print("   [Wait] 팝업 대기 (3초)...")
+        time.sleep(3.0)
+        send_native_keys("{ENTER}")
+        time.sleep(1.0)
 
     print("\n✅ iRAS 모든 권한 테스트 완료.")
     return True
