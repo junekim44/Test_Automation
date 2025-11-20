@@ -1,457 +1,198 @@
 import time
-
 import subprocess
-
 import win32gui
-
-import win32com.client
-
+import win32com.client 
+import win32api 
+import win32con 
 import requests
+import uiautomation as auto # 👈 Windows UI 자동화 라이브러리 (pip install uiautomation)
 
 from appium import webdriver
-
 from typing import Any, Dict
-
 from selenium.webdriver.common.by import By
-
-from selenium.webdriver.common.action_chains import ActionChains
-
-from selenium.webdriver.remote.webelement import WebElement
-
 from appium.options.common import AppiumOptions
 
-from appium.webdriver.common.appiumby import AppiumBy
-
-import uiautomation as auto
-
-import win32con
-
-import win32com.client as win32
-
-import win32api
-
-
-
 # ---------------------------------------------------------
-
-# [설정] WinAppDriver 경로 및 주소
-
+# [설정] 
 # ---------------------------------------------------------
-
 WAD_PATH = r"C:\Program Files (x86)\Windows Application Driver\WinAppDriver.exe"
-
 WAD_URL = "http://127.0.0.1:4723"
 
-
-
-# 창 이름 설정
-
-MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System"
-
+MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System" 
 SETUP_WINDOW_TITLE = "IDIS Center 설정"
-
 TARGET_DEVICE = "105_T6831"
 
-
-
 # ---------------------------------------------------------
-
-# 🛠️ [핵심 1] WinAppDriver 호환용 커스텀 드라이버
-
+# 🛠️ [핵심] uiautomation을 이용한 안전한 클릭 함수
 # ---------------------------------------------------------
-
-class LegacyWinAppDriver(webdriver.Remote):
-
-    def start_session(self, capabilities: Dict[str, Any], browser_profile=None) -> None:
-
-        print(f"   [Driver] WinAppDriver에 호환 모드(JSONWP)로 연결 시도...")
-
-        clean_caps = {k.split(':')[-1]: v for k, v in capabilities.items()}
-
-        payload = {"desiredCapabilities": clean_caps}
-
-       
-
-        try:
-
-            response = requests.post(f"{WAD_URL}/session", json=payload)
-
-            if response.status_code != 200:
-
-                raise Exception(f"HTTP {response.status_code}: {response.text}")
-
-           
-
-            data = response.json()
-
-            self.session_id = data.get('sessionId')
-
-            self.w3c = False
-
-            self.command_executor._url = WAD_URL
-
-            print(f"   [Driver] 연결 성공! Session ID: {self.session_id}")
-
-        except Exception as e:
-
-            raise Exception(f"WinAppDriver 연결 실패: {e}")
-
-
-
-# ---------------------------------------------------------
-
-# 🛠️ [핵심 2] 요소 안전 변환 (dict -> WebElement)
-
-# ---------------------------------------------------------
-
-def ensure_element(driver, element_or_dict):
-
-    if isinstance(element_or_dict, dict):
-
-        try:
-
-            elem_id = element_or_dict.get('ELEMENT') or list(element_or_dict.values())[0]
-
-            return WebElement(driver, elem_id)
-
-        except:
-
-            return element_or_dict
-
-    return element_or_dict
-
-
-
-# ---------------------------------------------------------
-
-# 🛠️ [핵심 3] 윈도우 네이티브 키보드 입력 함수
-
-# ---------------------------------------------------------
-
-def send_native_keys(keys):
-
-    """Appium을 거치지 않고 Windows OS에게 직접 키 입력을 명령"""
-
-    shell = win32com.client.Dispatch("WScript.Shell")
-
-    shell.SendKeys(keys)
-
-
-
-def native_mouse_right_click_by_automation(element_name: str):
-
+def uia_click_list_item(window_handle, automation_id, is_right_click=False, y_offset=None):
     """
-
-    WinAppDriver 대신 UIAutomation으로 요소 화면 좌표를 직접 검출 후 우클릭
-
+    y_offset이 None이면 요소의 '정중앙'을 클릭 (검색창, 버튼용)
+    y_offset이 숫자(예: 25)면 '상단 + offset' 위치를 클릭 (리스트 첫 줄용)
     """
-
     try:
-
-        control = auto.Control(Name=element_name)
-
-        if not control.Exists():
-
-            print(f"❌ UIA: 요소 '{element_name}' 찾기 실패")
-
+        print(f"   [UIA] 핸들({hex(window_handle)})에서 요소(ID:{automation_id}) 탐색 중...")
+        
+        window = auto.ControlFromHandle(window_handle)
+        target_elem = window.Control(AutomationId=automation_id)
+        
+        if not target_elem.Exists(maxSearchSeconds=3):
+            print(f"❌ [UIA] 요소(ID:{automation_id})를 찾을 수 없습니다.")
             return False
-
-       
-
-        rect = control.BoundingRectangle
-
-        x = int((rect.left + rect.right) / 2)
-
-        y = int((rect.top + rect.bottom) / 2)
-
-
-
-        print(f"   [UIA] 요소 좌표: ({x}, {y})")
-
-
-
-        win32api.SetCursorPos((x, y))
-
-        time.sleep(0.3)
-
-
-
-        win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, x, y, 0, 0)
-
-        time.sleep(0.1)
-
-        win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, x, y, 0, 0)
-
-
-
-        print("   → 우클릭 완료 (UIAutomation)")
-
+            
+        rect = target_elem.BoundingRectangle
+        print(f"   [UIA] 좌표 발견: {rect}")
+        
+        # ---------------------------------------------------------
+        # [수정된 부분] 좌표 계산 로직 개선
+        # ---------------------------------------------------------
+        click_x = int((rect.left + rect.right) / 2) # 가로 중앙
+        
+        if y_offset is None:
+            # 오프셋이 없으면 세로도 '정중앙' 클릭 (검색창 입력용)
+            click_y = int((rect.top + rect.bottom) / 2)
+        else:
+            # 오프셋이 있으면 '상단 + 오프셋' 클릭 (리스트 첫 줄 선택용)
+            click_y = int(rect.top + y_offset)
+            
+        print(f"   [UIA] 마우스 이동 -> ({click_x}, {click_y})")
+        
+        win32api.SetCursorPos((click_x, click_y))
+        time.sleep(0.5)
+        
+        if is_right_click:
+            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, click_x, click_y, 0, 0)
+            time.sleep(0.1)
+            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, click_x, click_y, 0, 0)
+        else:
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, click_x, click_y, 0, 0)
+            time.sleep(0.1)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, click_x, click_y, 0, 0)
+            
         return True
 
-
-
     except Exception as e:
-
-        print(f"❌ UIA 우클릭 실패: {e}")
-
+        print(f"🔥 [UIA] 제어 실패: {e}")
         return False
 
-
-
-# ---------------------------------------------------------
-
-# [함수] 창 핸들 찾기 및 연결
-
-# ---------------------------------------------------------
-
-def attach_to_window(window_name):
-
-    print(f"[System] '{window_name}' 창 찾는 중...")
-
-    hwnd = win32gui.FindWindow(None, window_name)
-
-   
-
-    if not hwnd:
-
-        def callback(h, _):
-
-            if win32gui.IsWindowVisible(h):
-
-                t = win32gui.GetWindowText(h)
-
-                if window_name in t:
-
-                    nonlocal hwnd
-
-                    hwnd = h
-
-                    return False
-
+def uia_type_text(window_handle, automation_id, text):
+    """uiautomation으로 입력창을 찾아 클릭 후 텍스트 입력"""
+    try:
+        # 수정됨: y_offset 인자를 주지 않아 정중앙을 클릭하게 함
+        if uia_click_list_item(window_handle, automation_id, is_right_click=False): 
+            time.sleep(0.5)
+            send_native_keys("^a{BACKSPACE}") # 기존 내용 삭제
+            time.sleep(0.2)
+            send_native_keys(text)
             return True
+        return False
+    except Exception as e:
+        print(f"🔥 [UIA] 입력 실패: {e}")
+        return False
 
+# ---------------------------------------------------------
+# 🛠️ 윈도우 네이티브 입력 함수
+# ---------------------------------------------------------
+def send_native_keys(keys):
+    shell = win32com.client.Dispatch("WScript.Shell")
+    shell.SendKeys(keys)
+
+def get_window_handle(window_name):
+    print(f"[System] '{window_name}' 창 찾는 중...")
+    hwnd = win32gui.FindWindow(None, window_name)
+    
+    if not hwnd:
+        # 부분 일치 검색
+        def callback(h, _):
+            if win32gui.IsWindowVisible(h):
+                t = win32gui.GetWindowText(h)
+                if window_name in t:
+                    nonlocal hwnd
+                    hwnd = h
+                    return False
+            return True
         try: win32gui.EnumWindows(callback, None)
-
         except: pass
 
-
-
-    if not hwnd:
-
+    if hwnd:
+        # 창을 맨 앞으로
+        try:
+            if win32gui.IsIconic(hwnd): win32gui.ShowWindow(hwnd, 9)
+            win32gui.SetForegroundWindow(hwnd)
+        except: pass
+        print(f"✅ 창 핸들 획득: {hex(hwnd)}")
+        return hwnd
+    else:
         print(f"❌ '{window_name}' 창을 찾을 수 없습니다.")
-
         return None
 
-
-
-    try:
-
-        if win32gui.IsIconic(hwnd): win32gui.ShowWindow(hwnd, 9)
-
-        win32gui.SetForegroundWindow(hwnd)
-
-    except: pass
-
-
-
-    hwnd_hex = hex(hwnd)
-
-    print(f"✅ 창 핸들 획득: {hwnd_hex}")
-
-
-
-    options = AppiumOptions()
-
-    options.set_capability("appTopLevelWindow", hwnd_hex)
-
-    options.set_capability("platformName", "Windows")
-
-    options.set_capability("deviceName", "WindowsPC")
-
-
-
-    try:
-
-        return LegacyWinAppDriver(command_executor=WAD_URL, options=options)
-
-    except Exception as e:
-
-        print(f"❌ 연결 오류: {e}")
-
-        return None
-
-
-
+# ---------------------------------------------------------
+# 메인 실행 로직
+# ---------------------------------------------------------
 def run_iras_automation():
-
+    # 1. WinAppDriver 실행 (혹시 몰라 켜두지만, UIA 사용시 필수는 아님)
     try:
-
         subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
-
     except: pass
-
     time.sleep(2)
 
-
-
-    # [Step 1] 메인 화면 키보드 진입
-
-    driver = attach_to_window(MAIN_WINDOW_TITLE)
-
-    if not driver: return
-
-
+    # [Step 1] 메인 화면 진입 (키보드 매크로)
+    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE)
+    if not main_hwnd: return
 
     try:
-
         print("[Step 1] 윈도우 키보드 명령 전송 (Alt+s -> i -> Enter)...")
-
-        send_native_keys("%s") # Alt+s
-
+        send_native_keys("%s") 
         time.sleep(1.0)
-
         send_native_keys("i")
-
         time.sleep(1.0)
-
         send_native_keys("{ENTER}")
-
         time.sleep(1.0)
-
-        send_native_keys("{ENTER}")
-
-        time.sleep(1.0)
-
-        print("✅ 키보드 입력 완료. 팝업 대기...")
-
+        send_native_keys("{ENTER}") # 확인차
+        print("✅ 키보드 입력 완료.")
     except Exception as e:
-
         print(f"❌ 키보드 입력 오류: {e}")
 
-    finally:
-
-        try: driver.quit()
-
-        except: pass
-
-
-
     print("[System] 팝업 창 로딩 대기 (3초)...")
+    time.sleep(3) 
 
-    time.sleep(3)
-
-
-
-    # [Step 2] 설정 팝업창 연결
-
-    driver = attach_to_window(SETUP_WINDOW_TITLE)
-
-    if not driver:
-
+    # [Step 2] 설정 팝업창 제어 (UIA 사용)
+    setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
+    if not setup_hwnd: 
         print("❌ 설정 창이 뜨지 않았습니다.")
-
         return
 
-
-
     try:
-
         # ---------------------------------------------------------
-
         # [Step 3] 검색창 입력 (ID: "101")
-
         # ---------------------------------------------------------
-
-        print(f"[Step 3] 검색창(ID:101)에 '{TARGET_DEVICE}' 입력...")
-
-       
-
-        raw_search_box = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "101")
-
-        search_box = ensure_element(driver, raw_search_box)
-
-       
-
-        # 1. 클릭해서 포커스 주기 (커서 이동)
-
-        search_box.click()
-
-        time.sleep(0.5)
-
-       
-
-        # 2. ⭐️ [수정됨] Appium send_keys 대신 Native Input 사용
-
-        # 기존 텍스트 제거를 위해 Ctrl+A -> Backspace 입력 (안전장치)
-
-        send_native_keys("^a{BACKSPACE}")
-
-        time.sleep(0.2)
-
-       
-
-        # 실제 장치 이름 타이핑
-
-        send_native_keys(TARGET_DEVICE)
-
-       
+        print(f"\n[Step 3] 검색창(ID:101)에 '{TARGET_DEVICE}' 입력 (UIA)...")
+        
+        # uiautomation으로 직접 찾아서 클릭 & 입력
+        if not uia_type_text(setup_hwnd, "101", TARGET_DEVICE):
+            print("❌ 검색창 제어 실패")
+            return
 
         print("   -> 필터링 대기 (2초)...")
-
-        time.sleep(2)
-
-
+        time.sleep(2) 
 
         # ---------------------------------------------------------
-
         # [Step 4] 장치 선택 및 우클릭 (ID: "1000")
-
         # ---------------------------------------------------------
-
-        print("[Step 4] 검색된 장치(ID:1000) 찾기...")
-
-       
-
-        # 1. 요소 찾기
-
-        target_item = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "1000")
-
-       
-
-        # 2. ⭐️ [핵심] 윈도우 네이티브 마우스 우클릭 실행
-
-        # ActionChains 대신 직접 마우스를 움직여서 클릭합니다.
-
-        if native_mouse_right_click_by_automation(TARGET_DEVICE):
-
-            print("✅ 우클릭 성공! (컨텍스트 메뉴 확인)")
-
+        print(f"\n[Step 4] 검색된 장치 리스트(ID:1000) 상단 우클릭 (UIA)...")
+        
+        # uiautomation으로 리스트 컨테이너 찾아서 상단 클릭
+        if uia_click_list_item(setup_hwnd, "1000", is_right_click=True, y_offset=25):
+            print("🎉 우클릭 성공! (컨텍스트 메뉴 확인)")
         else:
-
-            print("❌ 우클릭 실패")
-
-
+            print("❌ 리스트 제어 실패")
 
         time.sleep(2)
-
-
 
     except Exception as e:
-
         print(f"🔥 오류 발생: {e}")
-
         import traceback
-
         traceback.print_exc()
 
-    finally:
-
-        try: driver.quit()
-
-        except: pass
-
-
-
 if __name__ == "__main__":
-
     run_iras_automation()
