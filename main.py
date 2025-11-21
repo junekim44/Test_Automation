@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 # 각 모듈에서 테스트 함수 import
 try:
     from system_tests import run_default_setup_test, run_setup_roundtrip_test
-    # from datetime_tests import run_ntp_test, run_timezone_test, run_format_test
+    # from datetime_test import run_ntp_test, run_timezone_test, run_format_test
     from language_test import run_all_languages_test # 필요시 주석 해제
     from datetime_test import run_datetime_tests
     from user_group_tests import run_user_group_test
@@ -57,7 +57,7 @@ def main():
             # print(f"🎉 [성공] {msg}")
 
             # --- [사용자/그룹 테스트] ---
-            success, msg = run_user_group_test(page, CAMERA_IP)
+            success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)
             if not success: raise Exception(msg)
             print(f"🎉 [최종 성공] {msg}")
 
