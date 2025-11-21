@@ -4,22 +4,38 @@ from common_actions import handle_popup, VISIBLE_DIALOG, DIALOG_BUTTONS
 import iRAS_test
 
 # ===========================================================
-# 📋 [매핑] UI ID & API 권한명 매핑
+# 📋 [설정] ID 및 API 매핑
 # ===========================================================
 
-# 1. UI 체크박스 제어용 ID
-PERM_ID_MAP = {
-    "업그레이드": "#edit-auth-upgrade",
-    "설정": "#edit-auth-setup",
-    "컬러 조정": "#edit-auth-color",
-    "PTZ 제어": "#edit-auth-ptz",
-    "알람-아웃 제어": "#edit-auth-alarm",
-    "검색": "#edit-auth-search",
-    "클립-카피": "#edit-auth-clipcopy"
+# 1. 그룹 생성 (Add) 팝업용 ID (edit- 없음)
+ADD_ID_MAP = {
+    "NAME_INPUT": "#edit-gid",
+    "PERMS": {
+        "업그레이드": "#auth-upgrade",
+        "설정": "#auth-setup",
+        "컬러 조정": "#auth-color",
+        "PTZ 제어": "#auth-ptz",
+        "알람-아웃 제어": "#auth-alarm",
+        "검색": "#auth-search",
+        "클립-카피": "#auth-clipcopy"
+    }
 }
 
-# 2. API 검증용 권한명 매핑 (UI 한글 -> API 영문)
-# API Doc: upgrade | setup | color | ptz | alarmOut | search | clipCopy | systemCheck
+# 2. 그룹 변경 (Edit) 팝업용 ID (edit- 있음)
+EDIT_ID_MAP = {
+    "NAME_INPUT": "#edit-auth-gid",
+    "PERMS": {
+        "업그레이드": "#edit-auth-upgrade",
+        "설정": "#edit-auth-setup",
+        "컬러 조정": "#edit-auth-color",
+        "PTZ 제어": "#edit-auth-ptz",
+        "알람-아웃 제어": "#edit-auth-alarm",
+        "검색": "#edit-auth-search",
+        "클립-카피": "#edit-auth-clipcopy"
+    }
+}
+
+# 3. API 검증용 매핑 (UI한글 -> API영문)
 UI_TO_API_MAP = {
     "업그레이드": "upgrade",
     "설정": "setup",
@@ -44,69 +60,78 @@ INITIAL_PERMS = {
 }
 
 # ===========================================================
-# 📡 [API] 권한 검증 함수 (신규 추가)
+# 📡 [API] 권한 검증 함수 (복구됨)
 # ===========================================================
-def verify_permissions_via_api(page: Page, ip: str, group_name: str, expected_perms_dict: dict):
-    """
-    API를 호출하여 특정 그룹의 실제 권한이 기대값과 일치하는지 검증합니다.
-    """
-    print(f"   📡 [API] '{group_name}' 권한 검증 수행 중...")
+def verify_permissions_via_api(page: Page, ip: str, group_name: str, expected_perms: dict):
+    """API를 통해 실제 권한이 적용되었는지 교차 검증"""
+    print(f"   📡 [API] '{group_name}' 권한 실제 적용 여부 확인 중...")
     
     api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=groupSetup&mode=1"
     
     try:
-        # 브라우저 컨텍스트를 이용해 fetch 실행 (세션 쿠키 자동 사용)
-        resp_text = page.evaluate(f"""
-            fetch('{api_url}').then(response => response.text())
-        """)
-        
-        # 응답 파싱 (Query String 형태 -> Dict)
-        # 예: returnCode=0&groupCount=2&groupName1=admin...
+        # 현재 세션으로 API 호출
+        resp_text = page.evaluate(f"fetch('{api_url}').then(r => r.text())")
         data = dict(item.split("=", 1) for item in resp_text.strip().split("&") if "=" in item)
         
-        # 1. 그룹 찾기
-        target_index = -1
+        # 그룹 찾기
         count = int(data.get("groupCount", 0))
-        
+        target_idx = -1
         for i in range(1, count + 1):
-            name_key = f"groupName{i}"
-            if data.get(name_key) == group_name:
-                target_index = i
+            if data.get(f"groupName{i}") == group_name:
+                target_idx = i
                 break
         
-        if target_index == -1:
-            print(f"   ❌ [API Fail] 그룹 '{group_name}'을 찾을 수 없습니다.")
+        if target_idx == -1:
+            print(f"   ❌ [API] 그룹 '{group_name}'을 찾을 수 없습니다.")
             return False
 
-        # 2. 권한 파싱 (pipe separated string)
-        # 예: "setup|search"
-        auth_str = data.get(f"authorities{target_index}", "")
-        current_api_perms = auth_str.split("|") if auth_str else []
+        # 권한 파싱 (예: setup|search|color)
+        auth_str = data.get(f"authorities{target_idx}", "")
+        current_apis = auth_str.split("|") if auth_str else []
         
-        # 3. 비교 검증
+        # 검증
         is_valid = True
-        for ui_name, should_have in expected_perms_dict.items():
+        for ui_name, should_have in expected_perms.items():
             api_name = UI_TO_API_MAP.get(ui_name)
             if not api_name: continue
             
-            has_perm = api_name in current_api_perms
-            
+            has_perm = api_name in current_apis
             if should_have != has_perm:
-                print(f"   ❌ [Mismatch] '{ui_name}'({api_name}) -> 기대: {should_have}, 실제: {has_perm}")
+                print(f"   ❌ [Mismatch] {ui_name}({api_name}) -> 기대: {should_have}, 실제: {has_perm}")
                 is_valid = False
-        
+                
         if is_valid:
-            print(f"   ✅ [API OK] 권한 설정이 서버에 올바르게 반영되었습니다.")
+            print(f"   ✅ [API] 권한 검증 통과 (API: {auth_str})")
             return True
-        else:
-            return False
+        return False
 
     except Exception as e:
-        print(f"   🔥 [API Error] 검증 중 예외 발생: {e}")
+        print(f"   🔥 [API] 검증 중 오류: {e}")
         return False
 
 # ===========================================================
-# ⚙️ [UI 제어 함수] (기존 코드 유지)
+# ⚙️ [Helper] 체크박스 제어
+# ===========================================================
+def toggle_permissions(popup, id_map, target_state):
+    for perm_name, should_check in target_state.items():
+        target_id = id_map.get(perm_name)
+        if not target_id: continue
+
+        checkbox = popup.locator(target_id)
+        if checkbox.is_visible():
+            if checkbox.is_checked() != should_check:
+                if should_check:
+                    checkbox.check()
+                    print(f"   -> [체크] {perm_name}")
+                else:
+                    checkbox.uncheck()
+                    print(f"   -> [해제] {perm_name}")
+                # time.sleep(0.2) # 필요시 대기
+        else:
+            print(f"⚠️ 요소 안 보임: {perm_name} ({target_id})")
+
+# ===========================================================
+# ⚙️ [UI 제어 함수]
 # ===========================================================
 
 def select_group_in_tree(page: Page, group_name: str):
@@ -127,30 +152,32 @@ def create_group_and_user(page: Page, group_name: str, uid: str, upw: str):
 
         # 1. 그룹 생성
         if select_group_in_tree(page, group_name):
-            print(f"ℹ️ 그룹 '{group_name}' 존재. 생성 스킵.")
+            print(f"ℹ️ 그룹 '{group_name}' 이미 존재. 생성 스킵.")
         else:
             print(f"[UI] 새 그룹 '{group_name}' 생성...")
             page.locator("#add-group-btn").click()
-            page.wait_for_selector("#edit-gid", state="visible")
+            page.wait_for_selector("#edit-gid", state="visible", timeout=2000)
             page.wait_for_timeout(1000)
             
-            # 팝업 및 입력
-            group_dialog = page.locator(".ui-dialog").filter(has=page.locator("#edit-gid"))
-            page.locator("#edit-gid").fill(group_name)
+            # 팝업 특정 (입력칸 ID 기준)
+            input_id = ADD_ID_MAP["NAME_INPUT"]
+            group_dialog = page.locator(".ui-dialog").filter(has=page.locator(input_id))
+            
+            page.locator(input_id).fill(group_name)
             page.wait_for_timeout(500)
             
-            # 초기 권한 설정
-            print("   -> 초기 권한 설정 중...")
-            toggle_permissions(page, group_dialog, INITIAL_PERMS)
+            # 초기 권한 설정 (ADD_ID_MAP 사용)
+            print("   -> 초기 권한 적용 중...")
+            toggle_permissions(group_dialog, ADD_ID_MAP["PERMS"], INITIAL_PERMS)
 
             # 확인
             confirm_btn = group_dialog.locator(".ui-dialog-buttonset button").first
             if confirm_btn.is_enabled():
                 confirm_btn.click()
-                page.locator("#edit-gid").wait_for(state="hidden")
+                page.locator(input_id).wait_for(state="hidden")
                 page.wait_for_timeout(1000)
             else:
-                print("🔥 그룹 생성 불가(중복 등). 취소.")
+                print("🔥 확인 버튼 비활성화. 취소.")
                 group_dialog.locator(".ui-dialog-buttonset button").last.click()
                 return False
 
@@ -170,15 +197,14 @@ def create_group_and_user(page: Page, group_name: str, uid: str, upw: str):
         
         # 경고창 처리
         if page.locator(VISIBLE_DIALOG).count() > 1:
-            top_dialog = page.locator(".ui-dialog:visible").last
-            if top_dialog.locator("#add-user-edit-uid").count() == 0:
+            top_dlg = page.locator(".ui-dialog:visible").last
+            if top_dlg.locator("#add-user-edit-uid").count() == 0:
                 print("   -> 경고창 닫기")
-                btn = top_dialog.locator(".ui-dialog-buttonset button").first
+                btn = top_dlg.locator(".ui-dialog-buttonset button").first
                 if btn.is_visible(): btn.click(force=True)
-                else: top_dialog.locator("button").first.click(force=True)
-                page.wait_for_timeout(1000)
+                else: top_dlg.locator("button").first.click(force=True)
+                page.wait_for_timeout(500)
 
-        # 확인
         user_confirm_btn = user_dialog.locator(".ui-dialog-buttonset button").first
         if user_confirm_btn.is_enabled():
             user_confirm_btn.click()
@@ -187,60 +213,32 @@ def create_group_and_user(page: Page, group_name: str, uid: str, upw: str):
             print(f"ℹ️ 사용자 중복. 취소.")
             user_dialog.locator(".ui-dialog-buttonset button").last.click()
         
-        # 저장
-        print("[UI] 설정 저장...")
         page.locator("#setup-apply").click()
         handle_popup(page)
-        time.sleep(3)
+        time.sleep(2)
         return True
 
     except Exception as e:
         print(f"❌ 생성 오류: {e}")
         return False
 
-def toggle_permissions(page, popup, target_state):
-    """체크박스 제어 Helper"""
-    for perm_name, should_check in target_state.items():
-        # ID 매핑 조회
-        target_id = PERM_ID_MAP.get(perm_name)
-        if not target_id: continue
-
-        # 체크박스 찾기 (매핑된 ID 사용)
-        checkbox = popup.locator(target_id)
-        
-        if checkbox.is_visible():
-            if checkbox.is_checked() != should_check:
-                if should_check:
-                    checkbox.check()
-                    print(f"   -> [체크] {perm_name}")
-                else:
-                    checkbox.uncheck()
-                    print(f"   -> [해제] {perm_name}")
-                page.wait_for_timeout(300)
-        else:
-            # ID 매핑이 틀렸거나(그룹추가 vs 그룹변경) 안보일 때 Fallback
-            # 원래 '그룹 추가' 팝업은 ID가 다를 수 있으나, 현재 제공된 ID(#edit-auth-...)로 통일됨 가정
-            print(f"⚠️ 요소 안 보임: {perm_name} ({target_id})")
-
 def set_permissions_state(page: Page, group_name: str, target_state: dict):
-    """그룹 권한 변경"""
+    """그룹 권한 변경 (변경용 ID 사용)"""
     try:
         print(f"[UI] '{group_name}' 권한 변경 시작...")
-        
         if not select_group_in_tree(page, group_name): return False
-        
         page.locator("#edit-user-btn").click()
         
-        try:
-            page.wait_for_selector("#edit-group-diag", state="visible", timeout=5000)
+        try: page.wait_for_selector("#edit-group-diag", state="visible", timeout=5000)
         except:
-            print("🔥 그룹 변경 팝업 미발견")
+            print("🔥 변경 팝업 미발견")
             return False
 
         popup = page.locator(".ui-dialog").filter(has=page.locator("#edit-group-diag"))
         page.wait_for_timeout(1000)
 
-        toggle_permissions(page, popup, target_state)
+        # 권한 변경 (EDIT_ID_MAP 사용)
+        toggle_permissions(popup, EDIT_ID_MAP["PERMS"], target_state)
 
         confirm_btn = popup.locator(".ui-dialog-buttonset button").first
         page.wait_for_timeout(500)
@@ -278,9 +276,9 @@ def run_user_group_test(page: Page, camera_ip: str):
     if not create_group_and_user(page, GROUP, UID, UPW):
         return False, "계정 생성 실패"
 
-    # ⭐️ [API 검증 1] 초기 권한 확인 (Phase 1과 동일해야 함)
+    # ⭐️ [API 검증 1] 초기 권한 확인 (설정/검색 ON)
     if not verify_permissions_via_api(page, camera_ip, GROUP, INITIAL_PERMS):
-        return False, "초기 권한 API 검증 실패"
+        return False, "API 검증 실패 (초기 설정)"
 
     # 2. [Phase 1] iRAS 검증
     print("\n🖥️ [Phase 1] iRAS 검증 시작...")
@@ -299,14 +297,13 @@ def run_user_group_test(page: Page, camera_ip: str):
     if not set_permissions_state(page, GROUP, phase2_perms):
         return False, "Phase 2 권한 설정 실패"
 
-    # ⭐️ [API 검증 2] 변경된 권한 확인
-    # Phase 2에서 설정한 권한들이 모두 False(해제)인지 확인
-    # (기존에 꺼져있던 업그레이드 등도 여전히 꺼져있어야 하므로 전체 검증 권장)
+    # ⭐️ [API 검증 2] 변경된 권한 확인 (모두 OFF)
+    # 전체 권한 상태를 만들어 검증 (초기값 복사 후 변경값 덮어쓰기)
     full_phase2_perms = INITIAL_PERMS.copy()
-    full_phase2_perms.update(phase2_perms) # 설정, 검색 등을 False로 덮어씀
+    full_phase2_perms.update(phase2_perms)
     
     if not verify_permissions_via_api(page, camera_ip, GROUP, full_phase2_perms):
-        return False, "Phase 2 권한 API 검증 실패"
+        return False, "API 검증 실패 (Phase 2 변경)"
 
     # 4. [Phase 2] iRAS 검증
     success_p2, msg_p2 = iRAS_test.run_iras_permission_check(DEVICE, UID, UPW, phase=2)
