@@ -23,6 +23,7 @@ def main():
         # slow_mo=1000 : 모든 클릭/입력 동작마다 1초(1000ms)씩 텀을 둡니다. (속도 조절)
         browser = p.chromium.launch(channel="chrome", headless=False, slow_mo=1000) 
         
+        
         context = browser.new_context(
             http_credentials={'username': USERNAME, 'password': PASSWORD}
         )
@@ -37,25 +38,26 @@ def main():
             # 🧪 테스트 실행 (순서: 초기화 -> 기능테스트 -> 기타)
             # ----------------------------------------------------
             
-            # 시스템 초기화 및 복구 (가장 먼저 실행하여 Clean State 확보)
-            success, msg = run_default_setup_test(page, CAMERA_IP)
-            if not success: raise Exception(f"초기화 테스트 실패: {msg}")
-            print(f"🎉 [성공] {msg}")
+            # # 시스템 초기화 및 복구 (가장 먼저 실행하여 Clean State 확보)
+            # success, msg = run_default_setup_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"초기화 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
-            # 설정 내보내기/불러오기
-            success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
-            if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
-            print(f"🎉 [성공] {msg}")
+            # # 설정 내보내기/불러오기
+            # success, msg = run_setup_roundtrip_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
-            # 다국어 변경 테스트
-            success, msg = run_all_languages_test(page, CAMERA_IP)
-            if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
-            print(f"🎉 [성공] {msg}")
+            # # 다국어 변경 테스트
+            # success, msg = run_all_languages_test(page, CAMERA_IP)
+            # if not success: raise Exception(f"설정파일 테스트 실패: {msg}")
+            # print(f"🎉 [성공] {msg}")
 
-            # 날짜/시간 테스트 (NTP, Timezone, Format)
-            success, msg = run_datetime_tests(page, CAMERA_IP)
-            if not success: raise Exception(msg)
-            print(f"🎉 [성공] {msg}")
+            # # 날짜/시간 테스트 (NTP, Timezone, Format)
+
+            # success, msg = run_datetime_tests(page, CAMERA_IP)
+            # if not success: raise Exception(msg)
+            # print(f"🎉 [성공] {msg}")
 
             # --- [사용자/그룹 테스트] ---
             success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)

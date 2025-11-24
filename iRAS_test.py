@@ -113,6 +113,8 @@ def click_relative_mouse(dx, dy):
 
 def get_window_handle(window_name):
     hwnd = win32gui.FindWindow(None, window_name)
+    
+    # 1. FindWindow로 못 찾았을 경우 EnumWindows로 재탐색
     if not hwnd:
         def callback(h, _):
             if win32gui.IsWindowVisible(h) and window_name in win32gui.GetWindowText(h):
@@ -120,11 +122,29 @@ def get_window_handle(window_name):
             return True
         try: win32gui.EnumWindows(callback, None)
         except: pass
+        
     if hwnd:
         try:
-            if win32gui.IsIconic(hwnd): win32gui.ShowWindow(hwnd, 9)
+            # 2. [핵심 수정] 강제 포커싱을 위한 '최소화 -> 복구' 트릭
+            # Windows는 사용자 인터랙션이 없으면 포커스 이동을 막으므로,
+            # 창을 잠깐 최소화했다가 복구하는 동작(Action)을 주어 권한을 획득합니다.
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            time.sleep(0.2)
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.2)
+            
+            # 3. 최상단으로 가져오기
             win32gui.SetForegroundWindow(hwnd)
-        except: pass
+        except Exception as e:
+            print(f"⚠️ 창 포커싱 실패 (우회 시도): {e}")
+            # 4. [Fallback] 위 방법도 실패 시 Alt 키 입력으로 윈도우를 속임
+            try:
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.SendKeys('%') # Alt 키 입력 시뮬레이션
+                win32gui.SetForegroundWindow(hwnd)
+            except:
+                pass
+                
     return hwnd
 
 def right_click_surveillance_screen(window_handle):
