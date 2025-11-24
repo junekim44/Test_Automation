@@ -12,7 +12,7 @@ except ImportError as e:
     exit()
 
 # --- 전역 설정값 ---
-CAMERA_IP = "10.0.131.105" 
+CAMERA_IP = "10.0.131.104" 
 CAMERA_URL = f"http://{CAMERA_IP}/setup"
 USERNAME = "admin"
 PASSWORD = "qwerty0-" 
