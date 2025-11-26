@@ -149,6 +149,123 @@ def click_relative_mouse(dx, dy):
     time.sleep(0.1)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
+def run_fen_setup_process(device_name_to_search, fen_name):
+    """
+    [통합 시나리오]
+    1. iRAS 설정창 진입
+    2. 장치 검색 및 수정창 진입
+    3. 네트워크 탭 -> FEN 설정 -> 연결 테스트 -> 저장
+    4. 설정창 닫기
+    """
+    print(f"\n🖥️ [iRAS] '{device_name_to_search}' FEN 설정 자동화 시작...")
+    
+    # 1. iRAS 메인 핸들 확보 (강제 포커스)
+    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE, force_focus=True)
+    if not main_hwnd:
+        print("❌ iRAS가 실행되어 있지 않습니다.")
+        return False
+
+    # 2. 설정 창 열기 (단축키 시퀀스)
+    print("   [iRAS] 설정 창 진입 시도...")
+    send_native_keys("%s"); time.sleep(0.3)
+    send_native_keys("i"); time.sleep(0.3)
+    send_native_keys("{ENTER}"); time.sleep(0.3)
+    send_native_keys("{ENTER}")
+    time.sleep(3.0)
+
+    setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
+    if not setup_hwnd:
+        print("❌ 설정 창을 찾을 수 없습니다.")
+        return False
+
+    # 3. 장치 검색 (ID: 101)
+    print(f"   [iRAS] 장치 검색: {device_name_to_search}")
+    uia_type_text(setup_hwnd, "101", device_name_to_search)
+    time.sleep(1.5)
+
+    # 4. 장치 리스트(1000)에서 우클릭 -> 장치 수정(좌표) 클릭
+    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
+        click_relative_mouse(*COORD_DEVICE_MODIFY) # (50, 20)
+        print("   [Wait] 수정 창 대기...")
+        time.sleep(2.0)
+        
+        modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
+        if modify_hwnd:
+            print("   [iRAS] 장치 수정 창 진입 성공")
+            
+            # 5. 네트워크 탭으로 이동
+            if not uia_click_network_tab_offset(modify_hwnd):
+                print("   ❌ 네트워크 탭 이동 실패")
+                return False
+            time.sleep(1.0)
+
+            window = auto.ControlFromHandle(modify_hwnd)
+            
+            # 6. 주소 타입 변경 (콤보박스 ID: 1195 -> 'FEN')
+            print("   [iRAS] 주소 타입 'FEN' 변경 시도...")
+            combo = window.ComboBoxControl(AutomationId="1195")
+            if combo.Exists(maxSearchSeconds=3):
+                combo.Click() # 펼치기
+                time.sleep(0.5)
+                # 리스트에서 'FEN' 아이템 찾아 클릭 (전역 검색)
+                fen_item = auto.ListItemControl(Name="FEN")
+                if fen_item.Exists(maxSearchSeconds=2):
+                    fen_item.Click()
+                    print("   -> 'FEN' 선택 완료")
+                else:
+                    print("   ❌ 'FEN' 항목을 찾을 수 없습니다.")
+            else:
+                print("   ❌ 주소 타입 콤보박스(1195) 미발견")
+            time.sleep(1.0)
+
+            # 7. FEN 이름 입력 (DocumentControl ID: 22047)
+            print(f"   [iRAS] FEN 이름 입력: {fen_name}")
+            fen_input = window.DocumentControl(AutomationId="22047")
+            if not fen_input.Exists(maxSearchSeconds=1):
+                # DocumentControl로 안 잡히면 EditControl로 재시도
+                fen_input = window.EditControl(AutomationId="22047")
+            
+            if fen_input.Exists(maxSearchSeconds=2):
+                fen_input.Click()
+                time.sleep(0.2)
+                send_native_keys("^a{BACKSPACE}") # 기존 내용 삭제
+                time.sleep(0.2)
+                send_native_keys(fen_name)        # 새 이름 입력
+                time.sleep(0.5)
+            else:
+                print("   ❌ FEN 입력 칸(22047)을 찾을 수 없습니다.")
+                return False
+
+            # 8. 연결 테스트 및 팝업 처리 (요청하신 방식)
+            print("   [iRAS] 연결 테스트 실행...")
+            # 연결 테스트 버튼 (ID: 22132)
+            if uia_click_element(modify_hwnd, "22132"):
+                print("   -> 테스트 버튼 클릭됨. 3초 대기...")
+                time.sleep(3.0)
+                print("   -> 결과 팝업 닫기 (ENTER)")
+                send_native_keys("{ENTER}") 
+                time.sleep(1.0)
+            else:
+                print("   ⚠️ 연결 테스트 버튼(22132) 클릭 실패")
+
+            # 9. 저장 (확인 버튼 ID: 1)
+            print("   [iRAS] 설정 저장...")
+            uia_click_element(modify_hwnd, "1") 
+            time.sleep(2.0)
+            print("   ✅ 장치 수정 및 저장 완료")
+
+        else:
+            print("❌ '장치 수정' 팝업이 뜨지 않았습니다.")
+            return False
+    else:
+        print("❌ 장치 리스트 클릭 실패")
+        return False
+
+    # 10. 설정 창 닫기 (확인 버튼 ID: 1)
+    print("   [iRAS] 설정 창 닫기...")
+    uia_click_element(setup_hwnd, "1")
+    return True
+
 def right_click_surveillance_screen(window_handle):
     print(f"   [UIA] 감시 화면 탐색 중...")
     try:

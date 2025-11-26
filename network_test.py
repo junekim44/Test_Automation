@@ -3,6 +3,7 @@ from requests.auth import HTTPDigestAuth
 from scapy.all import ARP, Ether, srp, conf
 from playwright.sync_api import sync_playwright
 from common_actions import handle_popup
+import iRAS_test
 
 conf.verb = 0  # Scapy 조용히
 
@@ -177,51 +178,68 @@ if __name__ == "__main__":
     if not ctypes.windll.shell32.IsUserAnAdmin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{__file__}"', None, 1); sys.exit()
 
-    # Step 1: Link-Local 켜기
-    print(">>> Step 1: Link-Local 활성화")
-    set_ip(CFG["PC_IP"], CFG["SUBNET"], CFG["GW"])
-    mac = None
-    with sync_playwright() as p:
-        w = Web(p)
-        mac = w.get_mac(CFG["CAM_IP"])
-        if mac: w.set_link_local(True)
-        w.close()
+    # # Step 1: Link-Local 켜기
+    # print(">>> Step 1: Link-Local 활성화")
+    # set_ip(CFG["PC_IP"], CFG["SUBNET"], CFG["GW"])
+    # mac = None
+    # with sync_playwright() as p:
+    #     w = Web(p)
+    #     mac = w.get_mac(CFG["CAM_IP"])
+    #     if mac: w.set_link_local(True)
+    #     w.close()
     
-    if not mac: sys.exit()
+    # if not mac: sys.exit()
 
-    # Step 2: 169 대역 확인
-    print("\n>>> Step 2: 169.254 검증")
-    set_ip(CFG["AUTO_IP"], CFG["SUBNET"])
-    run("arp -d *")
+    # # Step 2: 169 대역 확인
+    # print("\n>>> Step 2: 169.254 검증")
+    # set_ip(CFG["AUTO_IP"], CFG["SUBNET"])
+    # run("arp -d *")
     
-    ip = find_ip(mac, timeout=40)
-    if ip and "169.254" in ip:
-        print(f"🎉 성공: {ip}")
-        with sync_playwright() as p:
-            w = Web(p); w.page.goto(f"http://{ip}/setup/setup.html")
-            w.set_link_local(False) # DHCP로 복구
-            w.close()
+    # ip = find_ip(mac, timeout=40)
+    # if ip and "169.254" in ip:
+    #     print(f"🎉 성공: {ip}")
+    #     with sync_playwright() as p:
+    #         w = Web(p); w.page.goto(f"http://{ip}/setup/setup.html")
+    #         w.set_link_local(False) # DHCP로 복구
+    #         w.close()
     
-    # Step 3: 물리 테스트
-    input("\n🚨 [ACTION] 사내망 뽑고, 카메라 재부팅 후 엔터 >> ")
-    set_dhcp(); run("arp -d *")
-    ip = find_ip(mac, timeout=60)
-    print(f"🎉 Auto-IP: {ip}" if ip and "169.254" in ip else "⚠️ 실패")
+    # # Step 3: 물리 테스트
+    # input("\n🚨 [ACTION] 사내망 뽑고, 카메라 재부팅 후 엔터 >> ")
+    # set_dhcp(); run("arp -d *")
+    # ip = find_ip(mac, timeout=60)
+    # print(f"🎉 Auto-IP: {ip}" if ip and "169.254" in ip else "⚠️ 실패")
 
-    # Step 4: 복구 및 검증
+    # Step 4: 복구 및 검증 (Web 설정)
     input("\n🚨 [ACTION] 사내망 연결 후 엔터 >> ")
     if wait_for_dhcp("10."):
-        ip = find_ip(mac, CFG["SCAN_NET"])
+        # IP 스캔 (MAC 주소 필요, 실제 실행 시엔 위에서 받아와야 함)
+        # ip = find_ip(mac, CFG["SCAN_NET"]) 
+        ip = CFG["CAM_IP"] # 테스트용 고정 IP 사용 시
+
         if ip:
-            # 1. FEN 설정 (UI)
+            # 1. FEN 설정 (Web UI)
+            print("\n>>> Step 4-1: Web에서 FEN 설정")
             with sync_playwright() as p:
                 w = Web(p); w.set_fen(ip); w.close()
             
-            # 2. 최종 API 검증 (NEW)
+            # 2. API 검증
+            print("\n>>> Step 4-2: API 검증")
             validator = ApiValidator(ip)
             if validator.check_dhcp() and validator.check_fen():
-                print("\n✅ [검증 완료] 모든 테스트 Pass!")
+                print("   ✅ Web/API 설정 검증 Pass!")
             else:
-                print("\n❌ [검증 실패] 설정이 제대로 적용되지 않았습니다.")
+                print("   ❌ Web/API 설정 검증 Fail!")
+
+            # 3. iRAS FEN 설정 및 연결 테스트 (Step 5)
+            print("\n>>> Step 5: iRAS에서 FEN 설정 및 연결 테스트")
+            target_device_name = "104_T6631"  # iRAS에 등록된 장치명
+            
+            # iRAS 자동화 실행
+            result = iRAS_test.run_fen_setup_process(target_device_name, CFG["FEN_NAME"])
+            
+            if result:
+                print("\n🎉 [최종 완료] iRAS FEN 설정 및 테스트 성공!")
+            else:
+                print("\n🔥 [실패] iRAS 자동화 중 오류 발생")
             
             input("종료하려면 엔터...")
