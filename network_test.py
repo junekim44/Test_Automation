@@ -1,245 +1,448 @@
-import time, subprocess, sys, ctypes, socket, requests
+import time
+import subprocess
+import sys
+import ctypes
+import socket
+import re
+import requests
+from urllib.parse import parse_qsl
 from requests.auth import HTTPDigestAuth
-from scapy.all import ARP, Ether, srp, conf
+from scapy.all import ARP, Ether, srp, sniff, conf
 from playwright.sync_api import sync_playwright
 from common_actions import handle_popup
 import iRAS_test
 
-conf.verb = 0  # Scapy 조용히
+# Scapy 출력 끄기
+conf.verb = 0
 
-# 🛠️ 설정
+# 🛠️ [설정] 환경 변수 및 상수
 CFG = {
-    "IFACE": "이더넷",
-    "PC_IP": "10.0.131.102", "SUBNET": "255.255.0.0", "GW": "10.0.0.1",
-    "AUTO_IP": "169.254.100.100",
-    "CAM_IP": "10.0.131.104", "PORT": "80", "ID": "admin", "PW": "qwerty0-",
-    "SCAN_NET": "10.0.17.0/24",
-    "FEN_SVR": "qa1.idis.co.kr", "FEN_NAME": "FEN테스트"
+    "IFACE": "이더넷",  # 실행하는 PC의 인터페이스 이름 확인 필수 (예: "Ethernet", "Wi-Fi")
+    "PC_STATIC_IP": "10.0.131.102", 
+    "PC_SUBNET": "255.255.0.0", 
+    "PC_GW": "10.0.0.1",
+    
+    "PC_AUTO_IP": "169.254.100.100", # Link-Local 테스트용 PC IP
+    "AUTO_SUBNET": "255.255.0.0",
+
+    # 타겟 카메라 정보 (초기 고정 IP)
+    "CAM_IP": "10.0.131.104", 
+    "PORT": "80", 
+    "ID": "admin", 
+    "PW": "qwerty0-",
+    
+    # 스캔 범위 설정
+    "SCAN_NET": "10.0.131.0/24", 
+    "SCAN_AUTO_NET": "169.254.0.0/16",
+    
+    "FEN_SVR": "qa1.idis.co.kr", 
+    "FEN_NAME": "FEN테스트"
 }
 
-# 🛡️ 시스템 유틸리티
-def run(cmd): 
-    try: subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except: pass
-
-def set_ip(ip, subnet, gw=None):
-    print(f"💻 [System] PC IP 변경 -> {ip}")
-    cmd = f'netsh interface ip set address name="{CFG["IFACE"]}" static {ip} {subnet}' + (f" {gw}" if gw else "")
-    run(cmd); time.sleep(4)
-
-def set_dhcp():
-    print("💻 [System] PC IP 변경 -> DHCP")
-    run(f'netsh interface ip set address name="{CFG["IFACE"]}" source=dhcp')
-    run(f'netsh interface ip set dns name="{CFG["IFACE"]}" source=dhcp')
-
-def wait_for_dhcp(prefix="10."):
-    print("💻 [System] IP 갱신 및 할당 대기...")
-    run("ipconfig /renew")
-    for _ in range(30):
+# =========================================================
+# 🛡️ [System] 윈도우 네트워크 제어 유틸리티
+# =========================================================
+class NetworkManager:
+    @staticmethod
+    def run_cmd(cmd):
         try:
-            if f": {prefix}" in subprocess.check_output("ipconfig", shell=True, encoding='cp949', errors='ignore'):
-                print("   -> 할당 완료! ✅"); return True
-        except: pass
-        time.sleep(2)
-    return False
-def wait_for_ping(ip, timeout=30):
-    print(f"📡 [System] {ip} 통신 대기 중...", end="")
-    start = time.time()
-    while time.time() - start < timeout:
-        # 윈도우 ping 명령어로 확인 (-n 1: 1회, -w 1000: 1초 대기)
-        if subprocess.call(f"ping -n 1 -w 1000 {ip}", shell=True, stdout=subprocess.DEVNULL) == 0:
-            print(" 연결됨! ✅")
-            return True
-        print(".", end="", flush=True)
-        time.sleep(1)
-    print(" 실패 ❌")
-    return False
+            subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
-# 📡 스캐너
-def find_ip(target_mac, scan_range=None, timeout=60):
-    print(f"🔍 [Scanner] {target_mac} 찾는 중...", end="")
-    try: conf.iface = CFG["IFACE"]; conf.route.resync()
-    except: pass
-    
-    start = time.time()
-    t_mac_norm = target_mac.lower().replace(":", "-")
-    
-    while time.time() - start < timeout:
-        print(".", end="", flush=True)
-        try: # Probe
+    @staticmethod
+    def set_static_ip(ip, subnet, gw=None):
+        print(f"💻 [System] PC IP 고정 설정 -> {ip}")
+        gw_cmd = f" {gw}" if gw else ""
+        cmd = f'netsh interface ip set address name="{CFG["IFACE"]}" static {ip} {subnet}{gw_cmd}'
+        NetworkManager.run_cmd(cmd)
+        time.sleep(5) # 네트워크 인터페이스 재설정 대기
+
+    @staticmethod
+    def set_dhcp():
+        print("💻 [System] PC IP DHCP(자동) 설정 변경 중...")
+        NetworkManager.run_cmd(f'netsh interface ip set address name="{CFG["IFACE"]}" source=dhcp')
+        NetworkManager.run_cmd(f'netsh interface ip set dns name="{CFG["IFACE"]}" source=dhcp')
+        time.sleep(3)
+
+    @staticmethod
+    def wait_for_dhcp(prefix="10.", timeout=60):
+        print("💻 [System] IP 할당 대기 중...", end="")
+        NetworkManager.run_cmd("ipconfig /renew")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                output = subprocess.check_output("ipconfig", shell=True, encoding='cp949', errors='ignore')
+                if f": {prefix}" in output:
+                    print(" 완료! ✅")
+                    return True
+            except: pass
+            print(".", end="", flush=True)
+            time.sleep(2)
+        print(" 실패 ❌")
+        return False
+
+    @staticmethod
+    def ping(ip, timeout=30):
+        print(f"📡 [Ping] {ip} 통신 확인 중...", end="")
+        start = time.time()
+        while time.time() - start < timeout:
+            if subprocess.call(f"ping -n 1 -w 500 {ip}", shell=True, stdout=subprocess.DEVNULL) == 0:
+                print(" 연결됨! ✅")
+                return True
+            print(".", end="", flush=True)
+            time.sleep(1)
+        print(" 응답 없음 ❌")
+        return False
+
+# =========================================================
+# 🔍 [Scanner] 네트워크 장치 탐색 (최적화 버전)
+# =========================================================
+class CameraScanner:
+    @staticmethod
+    def normalize_mac(mac):
+        if not mac: return ""
+        return mac.lower().replace("-", ":").replace(".", "")
+
+    @staticmethod
+    def scan_onvif(timeout=2):
+        """ONVIF Probe를 날려서 응답하는 장치들의 IP를 수집"""
+        discovery_msg = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b'<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" '
+            b'xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" '
+            b'xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery" '
+            b'xmlns:dn="http://www.onvif.org/ver10/network/wsdl">'
+            b'<e:Header>'
+            b'<w:MessageID>uuid:84ede3de-7dec-11d0-c360-f01234567890</w:MessageID>'
+            b'<w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
+            b'<w:Action a:mustUnderstand="true">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
+            b'</e:Header>'
+            b'<e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body>'
+            b'</e:Envelope>'
+        )
+        
+        found_ips = []
+        try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            sock.sendto(b'<?xml version="1.0" encoding="UTF-8"?><e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:dn="http://www.onvif.org/ver10/network/wsdl"><e:Header><w:MessageID>uuid:84ede3de-7dec-11d0-c360-f01234567890</w:MessageID><w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To><w:Action a:mustUnderstand="true">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action></e:Header><e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body></e:Envelope>', ('239.255.255.250', 3702))
+            sock.settimeout(timeout)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(discovery_msg, ('239.255.255.250', 3702))
+            
+            start = time.time()
+            while time.time() - start < timeout:
+                try:
+                    data, addr = sock.recvfrom(65536)
+                    # 응답 데이터에서 IP 추출
+                    resp_str = data.decode('utf-8', errors='ignore')
+                    ips = re.findall(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', resp_str)
+                    for ip in ips:
+                        if ip != "0.0.0.0" and ip != "239.255.255.250":
+                            found_ips.append(ip)
+                    found_ips.append(addr[0]) 
+                except socket.timeout: break
+        except: pass
+        finally: sock.close()
+        
+        return list(set(found_ips))
+
+    @staticmethod
+    def scan_arp(target_mac, scan_range, timeout=2):
+        """Active ARP Scan (소규모 대역용)"""
+        # 대역폭이 /16(65536개)인 경우 스캔 방지
+        if "/16" in scan_range or "/8" in scan_range:
+            return None
+
+        try:
+            ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=scan_range), 
+                         timeout=timeout, verbose=0, iface=CFG["IFACE"])
+            for _, rcv in ans:
+                if CameraScanner.normalize_mac(rcv.hwsrc) == target_mac:
+                    return rcv.psrc
+        except: pass
+        return None
+
+    @staticmethod
+    def sniff_target_packet(target_mac, timeout=5):
+        """Passive Sniffing: 타겟 MAC의 패킷을 감청하여 IP 확인"""
+        found_ip = None
+        target_mac = CameraScanner.normalize_mac(target_mac)
+
+        def packet_handler(pkt):
+            nonlocal found_ip
+            ip_to_check = None
+            # ARP 패킷 확인
+            if pkt.haslayer(Ether) and pkt.haslayer(ARP):
+                src_mac = CameraScanner.normalize_mac(pkt[Ether].src)
+                if src_mac == target_mac:
+                    found_ip = pkt[ARP].psrc
+                    return True # Stop sniffing
+            # IP 패킷 확인
+            elif pkt.haslayer(Ether) and pkt.haslayer("IP"):
+                src_mac = CameraScanner.normalize_mac(pkt[Ether].src)
+                if src_mac == target_mac:
+                    found_ip = pkt["IP"].src
+                    return True
+                
+            # 0.0.0.0은 IP 할당 전(Probe) 단계이므로 무시
+            if ip_to_check and ip_to_check != "0.0.0.0":
+                found_ip = ip_to_check
+                return True # 유효한 IP를 찾았으므로 스니핑 종료
+
+            return False
+
+        try:
+            sniff(iface=CFG["IFACE"], stop_filter=packet_handler, timeout=timeout, store=0)
         except: pass
         
-        try: # ARP Table Check
-            out = subprocess.check_output("arp -a", shell=True).decode('cp949', errors='ignore')
-            for line in out.splitlines():
-                if t_mac_norm in line.lower():
-                    found = line.split()[0]
-                    if scan_range and "169.254" not in scan_range and "169.254" in found: continue
-                    print(f" 발견! {found}"); return found
-        except: pass
+        return found_ip
 
-        if scan_range and "169.254" not in scan_range: # Active Scan
+    @staticmethod
+    def find_ip_combined(target_mac, scan_range, timeout=40):
+        print(f"🔍 [Scanner] {target_mac} 탐색 시작...", end="")
+        target_mac = CameraScanner.normalize_mac(target_mac)
+        target_mac_dash = target_mac.replace(":", "-")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # 1. ARP Table Cache Check
             try:
-                ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=scan_range), timeout=0.5, verbose=0, iface=CFG["IFACE"])
-                for _, rcv in ans:
-                    if rcv.hwsrc.lower().replace("-",":") == target_mac.lower().replace("-",":"):
-                        print(f" 발견! {rcv.psrc}"); return rcv.psrc
+                out = subprocess.check_output("arp -a", shell=True).decode('cp949', errors='ignore')
+                for line in out.splitlines():
+                    if target_mac_dash in line.lower():
+                        ip = line.split()[0]
+                        if "169.254" in scan_range and "169.254" not in ip: continue
+                        print(f" (ARP Cache) 발견! -> {ip}")
+                        return ip
             except: pass
-        time.sleep(1)
-    return None
 
-# 🕵️ API 검증기 (New!)
-class ApiValidator:
-    def __init__(self, ip):
-        self.url = f"http://{ip}:{CFG['PORT']}/cgi-bin/webSetup.cgi"
-        self.auth = HTTPDigestAuth(CFG['ID'], CFG['PW'])
+            # 2. ONVIF Probe
+            onvif_ips = CameraScanner.scan_onvif()
+            # ONVIF로 찾은 IP들 중 ARP를 통해 MAC 매칭되는지 확인하면 더 좋음 (생략 가능)
 
-    def _get(self, action):
+            # 3. Active ARP Scan
+            found_ip = CameraScanner.scan_arp(target_mac, scan_range)
+            if found_ip:
+                print(f" (Active ARP) 발견! -> {found_ip}")
+                return found_ip
+            
+            # 4. Passive Sniffing (Link-Local이나 DHCP 갱신 시 유용)
+            found_ip = CameraScanner.sniff_target_packet(target_mac, timeout=3)
+            if found_ip:
+                # 찾은 IP가 스캔 범위에 맞는지 대략 확인 (DHCP 환경 고려)
+                print(f" (Sniffing) 발견! -> {found_ip}")
+                return found_ip
+
+            print(".", end="", flush=True)
+            time.sleep(1)
+            
+        print(" 실패 ❌")
+        return None
+
+# =========================================================
+# 🌐 [Web UI] Playwright 컨트롤러
+# =========================================================
+class WebController:
+    def __init__(self, playwright_instance):
+        self.browser = playwright_instance.chromium.launch(headless=False)
+        self.context = self.browser.new_context(
+            http_credentials={"username": CFG["ID"], "password": CFG["PW"]}
+        )
+        self.page = self.context.new_page()
+
+    def close(self):
+        self.browser.close()
+
+    def _click_and_wait(self, selector):
         try:
-            res = requests.get(f"{self.url}?action={action}&mode=1", auth=self.auth, timeout=5)
-            if res.status_code == 200:
-                # API 응답 파싱 (key=value&key2=value2 형태)
-                return dict(item.split("=", 1) for item in res.text.strip().split("&") if "=" in item)
-        except Exception as e: print(f"⚠️ API Error: {e}")
-        return {}
-
-    def check_dhcp(self):
-        print("📡 [API] 네트워크 설정 검증...", end="")
-        data = self._get("networkIp") #
-        is_dhcp = data.get("type") == "dhcp"
-        print(f" DHCP={'✅' if is_dhcp else '❌'} ({data.get('type')})")
-        return is_dhcp
-
-    def check_fen(self):
-        print("📡 [API] FEN 설정 검증...", end="")
-        data = self._get("networkDDNS") #
-        use_ddns = data.get("useDDNS") == "on"
-        server = data.get("serverAddress") == CFG["FEN_SVR"]
-        print(f" 사용={'✅' if use_ddns else '❌'}, 서버={'✅' if server else '❌'}")
-        return use_ddns and server
-
-# 🌐 웹 컨트롤
-class Web:
-    def __init__(self, p):
-        self.browser = p.chromium.launch(headless=False)
-        self.ctx = self.browser.new_context(http_credentials={"username": CFG["ID"], "password": CFG["PW"]})
-        self.page = self.ctx.new_page()
-
-    def close(self): self.browser.close()
-    def _click(self, sel): 
-        try: self.page.click(sel, force=True, timeout=3000); time.sleep(0.5)
+            self.page.click(selector, timeout=3000)
+            time.sleep(0.5)
         except: pass
 
-    def get_mac(self, ip):
+    def get_mac_address(self, ip):
+        print(f"🌐 [Web] MAC 주소 추출 시도: {ip}")
         try:
             self.page.goto(f"http://{ip}:{CFG['PORT']}/setup/setup.html", timeout=10000)
-            self._click("#Page200_id"); self._click("#Page201_id")
+            self.page.wait_for_selector("#Page200_id", timeout=5000)
+            self._click_and_wait("#Page200_id")
+            self._click_and_wait("#Page201_id")
             mac = self.page.input_value("#mac-addressInfo", timeout=3000).strip()
-            print(f"✅ MAC: {mac}"); return mac
-        except: return None
+            print(f"   ✅ MAC Found: {mac}")
+            return mac
+        except Exception as e:
+            print(f"   ⚠️ Web Error: {e}")
+            return None
 
-    def set_link_local(self, enable=True):
-        print(f"🖱️ [UI] Link-Local {'ON' if enable else 'OFF'} 설정")
+    def set_link_local(self, ip, enable=True):
+        action_str = "ON" if enable else "OFF (DHCP 복구)"
+        print(f"🌐 [Web] Link-Local {action_str} 설정: {ip}")
         try:
-            self._click("#Page300_id"); self._click("#Page301_id")
+            self.page.goto(f"http://{ip}:{CFG['PORT']}/setup/setup.html", timeout=10000)
+            self.page.wait_for_selector("#Page300_id", timeout=10000)
+            
+            self._click_and_wait("#Page300_id") # 네트워크
+            self._click_and_wait("#Page301_id") # IP주소
+            
             chk = self.page.is_checked("#use-linklocal-only")
-            if (enable and not chk) or (not enable and chk):
-                self.page.click("label[for='use-linklocal-only']"); time.sleep(0.5)
-            if not enable: self.page.select_option("#ip-type", value="1") # DHCP
-            self.page.once("dialog", lambda d: d.accept())
-            self.page.click("text=저장"); time.sleep(3)
-        except: pass
+            if enable and not chk:
+                print("   -> 체크박스 활성화")
+                self.page.click("label[for='use-linklocal-only']")
+            elif not enable:
+                if chk:
+                    print("   -> 체크박스 해제")
+                    self.page.click("label[for='use-linklocal-only']")
+                self.page.select_option("#ip-type", value="1") # DHCP
+                print("   -> DHCP 선택")
 
-    def set_fen(self, ip):
-        print(f"🚀 [FEN] 설정: {ip}")
+            self.page.once("dialog", lambda d: d.accept())
+            self.page.click("text=저장")
+            time.sleep(3)
+            print("   ✅ 설정 적용 완료")
+            return True
+        except Exception as e:
+            print(f"   🔥 Link-Local 설정 실패: {e}")
+            return False
+
+    def set_fen_configuration(self, ip):
+        print(f"🌐 [Web] FEN 설정 변경: {ip}")
         try:
             self.page.goto(f"http://{ip}:{CFG['PORT']}/setup/setup.html")
-            self._click("#Page300_id"); self._click("#Page302_id")
+            self._click_and_wait("#Page300_id")
+            self._click_and_wait("#Page302_id") # FEN
             
-            if not self.page.is_checked("#use-fen"): self.page.click("label[for='use-fen']")
+            if not self.page.is_checked("#use-fen"):
+                self.page.click("label[for='use-fen']")
+            
             self.page.fill("#fen-server", CFG["FEN_SVR"])
             self.page.fill("#cam-name", CFG["FEN_NAME"])
             
-            # 중복 확인 -> 팝업 처리
-            self.page.click("#check-cam-name"); time.sleep(1)
+            self.page.click("#check-cam-name")
+            time.sleep(1)
             handle_popup(self.page)
+            self.page.click("#setup-apply")
+            handle_popup(self.page)
+            print("   ✅ Web FEN 설정 완료")
+        except Exception as e:
+            print(f"   🔥 Web FEN Config Error: {e}")
 
-            # 저장 -> 팝업 처리
-            self.page.click("text=저장"); time.sleep(1)
-            handle_popup(self.page)
-            
-            print("✅ UI 설정 완료")
+# =========================================================
+# 🕵️ [API] 카메라 설정 검증기
+# =========================================================
+class CameraApi:
+    def __init__(self, ip, port, user_id, user_pw):
+        self.base_url = f"http://{ip}:{port}/cgi-bin/webSetup.cgi"
+        self.session = requests.Session()
+        self.session.auth = HTTPDigestAuth(user_id, user_pw)
+
+    def _get_config(self, action):
+        try:
+            res = self.session.get(f"{self.base_url}?action={action}&mode=1", timeout=5)
+            if res.status_code == 200:
+                return dict(parse_qsl(res.text))
         except: pass
+        return {}
 
-# 🚀 메인 실행
+    def verify_fen_setting(self, expected_server):
+        data = self._get_config("networkDDNS")
+        use_ddns = data.get("useDDNS") == "on"
+        server_match = data.get("serverAddress") == expected_server
+        print(f"📡 [API] FEN 검증: Use={use_ddns}, Server={data.get('serverAddress')} -> {'Pass' if use_ddns and server_match else 'Fail'}")
+        return use_ddns and server_match
+
+# =========================================================
+# 🚀 Main Execution Flow
+# =========================================================
 if __name__ == "__main__":
     if not ctypes.windll.shell32.IsUserAnAdmin():
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{__file__}"', None, 1); sys.exit()
+        print("🔒 관리자 권한으로 재실행합니다...")
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{__file__}"', None, 1)
+        sys.exit()
 
-    # # Step 1: Link-Local 켜기
-    # print(">>> Step 1: Link-Local 활성화")
-    # set_ip(CFG["PC_IP"], CFG["SUBNET"], CFG["GW"])
-    # mac = None
-    # with sync_playwright() as p:
-    #     w = Web(p)
-    #     mac = w.get_mac(CFG["CAM_IP"])
-    #     if mac: w.set_link_local(True)
-    #     w.close()
+    print("=== Network & Automation Test Started ===")
     
-    # if not mac: sys.exit()
+    target_ip = CFG["CAM_IP"]
+    target_mac = None
 
-    # # Step 2: 169 대역 확인
-    # print("\n>>> Step 2: 169.254 검증")
-    # set_ip(CFG["AUTO_IP"], CFG["SUBNET"])
-    # run("arp -d *")
+    # [Step 1] PC IP 고정 및 MAC 주소 획득
+    print("\n>>> [Step 1] Link-Local 활성화 준비")
+    NetworkManager.set_static_ip(CFG["PC_STATIC_IP"], CFG["PC_SUBNET"], CFG["PC_GW"])
     
-    # ip = find_ip(mac, timeout=40)
-    # if ip and "169.254" in ip:
-    #     print(f"🎉 성공: {ip}")
-    #     with sync_playwright() as p:
-    #         w = Web(p); w.page.goto(f"http://{ip}/setup/setup.html")
-    #         w.set_link_local(False) # DHCP로 복구
-    #         w.close()
+    if NetworkManager.ping(target_ip):
+        with sync_playwright() as p:
+            web = WebController(p)
+            target_mac = web.get_mac_address(target_ip)
+            if target_mac:
+                web.set_link_local(target_ip, enable=True)
+            web.close()
+    else:
+        print("❌ 카메라 접속 실패. IP 설정을 확인하세요.")
+        # sys.exit() 
+
+    if not target_mac:
+        print("❌ MAC 주소 확보 실패로 테스트 중단")
+        sys.exit()
+
+    # [Step 2] 169.254 대역 검증
+    print("\n>>> [Step 2] 169.254 Auto-IP 검증")
+    NetworkManager.set_static_ip(CFG["PC_AUTO_IP"], CFG["AUTO_SUBNET"])
+    NetworkManager.run_cmd("arp -d *")
     
-    # # Step 3: 물리 테스트
-    # input("\n🚨 [ACTION] 사내망 뽑고, 카메라 재부팅 후 엔터 >> ")
-    # set_dhcp(); run("arp -d *")
-    # ip = find_ip(mac, timeout=60)
-    # print(f"🎉 Auto-IP: {ip}" if ip and "169.254" in ip else "⚠️ 실패")
+    auto_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_AUTO_NET"], timeout=40)
+    
+    if auto_ip and "169.254" in auto_ip:
+        print(f"🎉 Auto-IP 접속 성공: {auto_ip}")
+        print("\n>>> [Step 3] 설정 복구 (Link-Local OFF & DHCP)")
+        with sync_playwright() as p:
+            web = WebController(p)
+            web.set_link_local(auto_ip, enable=False)
+            web.close()
+    else:
+        print("⚠️ Auto-IP 탐색 실패 (DHCP 전환을 시도합니다)")
 
-    # Step 4: 복구 및 검증 (Web 설정)
-    input("\n🚨 [ACTION] 사내망 연결 후 엔터 >> ")
-    if wait_for_dhcp("10."):
-        # IP 스캔 (MAC 주소 필요, 실제 실행 시엔 위에서 받아와야 함)
-        # ip = find_ip(mac, CFG["SCAN_NET"]) 
-        ip = CFG["CAM_IP"] # 테스트용 고정 IP 사용 시
+    # [Step 3-1] 물리 테스트 (요청하신 부분 복원)
+    input("\n🚨 [ACTION] 사내망 랜선을 뽑고, 카메라를 재부팅한 후 Enter를 누르세요 >> ")
+    NetworkManager.set_dhcp() # PC를 DHCP(Auto-IP 대응)로 설정
+    NetworkManager.run_cmd("arp -d *")
+    
+    print(f"🔍 [Step 3] 물리적 Auto-IP 할당 확인 중...")
+    phy_auto_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_AUTO_NET"], timeout=60)
+    
+    if phy_auto_ip and "169.254" in phy_auto_ip:
+        print(f"🎉 [물리 테스트] Auto-IP 확인 성공: {phy_auto_ip}")
+    else:
+        print("⚠️ [물리 테스트] Auto-IP 탐색 실패 (재부팅 시간이 더 필요하거나 연결 문제)")
 
-        if ip:
-            # 1. FEN 설정 (Web UI)
-            print("\n>>> Step 4-1: Web에서 FEN 설정")
+    # [Step 4] PC 네트워크 복구 및 DHCP IP 탐색
+    input("\n🚨 [ACTION] 사내망 랜선을 다시 연결한 후 Enter를 누르세요 >> ")
+    print("\n>>> [Step 4] PC 네트워크 복구 및 DHCP IP 탐색")
+    NetworkManager.set_dhcp()
+    
+    # PC가 IP를 받아오면 카메라 탐색 시작
+    if NetworkManager.wait_for_dhcp("10."):
+        NetworkManager.run_cmd("arp -d *")
+        
+        print(f"🔍 [Step 4] DHCP로 변경된 카메라 IP 탐색 중...")
+        new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=60)
+        
+        if new_dhcp_ip and NetworkManager.ping(new_dhcp_ip):
+            print(f"🎉 카메라 재접속 성공: {new_dhcp_ip}")
+            
+            # 1. FEN 설정 (Web)
             with sync_playwright() as p:
-                w = Web(p); w.set_fen(ip); w.close()
+                web = WebController(p)
+                web.set_fen_configuration(new_dhcp_ip)
+                web.close()
             
             # 2. API 검증
-            print("\n>>> Step 4-2: API 검증")
-            validator = ApiValidator(ip)
-            if validator.check_dhcp() and validator.check_fen():
-                print("   ✅ Web/API 설정 검증 Pass!")
-            else:
-                print("   ❌ Web/API 설정 검증 Fail!")
+            api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            api.verify_fen_setting(CFG["FEN_SVR"])
 
-            # 3. iRAS FEN 설정 및 연결 테스트 (Step 5)
-            print("\n>>> Step 5: iRAS에서 FEN 설정 및 연결 테스트")
-            target_device_name = "104_T6631"  # iRAS에 등록된 장치명
+            # 3. iRAS 자동화 (Step 5)
+            print("\n>>> [Step 5] iRAS 연동 테스트")
+            search_key = target_mac.replace(":", "")
+            iRAS_test.run_fen_setup_process(search_key, CFG["FEN_NAME"])
+        else:
+            print("❌ 카메라 DHCP IP를 찾을 수 없습니다.")
             
-            # iRAS 자동화 실행
-            result = iRAS_test.run_fen_setup_process(target_device_name, CFG["FEN_NAME"])
-            
-            if result:
-                print("\n🎉 [최종 완료] iRAS FEN 설정 및 테스트 성공!")
-            else:
-                print("\n🔥 [실패] iRAS 자동화 중 오류 발생")
-            
-            input("종료하려면 엔터...")
+    input("\n✅ 테스트 완료. 종료하려면 Enter...")
