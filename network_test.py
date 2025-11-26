@@ -30,6 +30,9 @@ CFG = {
     "PORT": "80", 
     "ID": "admin", 
     "PW": "qwerty0-",
+
+    # iRAS 테스트용 장치 이름 (MAC 대신 사용)
+    "IRAS_DEV_NAME": "104_T6831",
     
     # 스캔 범위 설정
     "SCAN_NET": "10.0.131.0/24", 
@@ -439,9 +442,11 @@ if __name__ == "__main__":
             api.verify_fen_setting(CFG["FEN_SVR"])
 
             # 3. iRAS 자동화 (Step 5)
+            # 🔍 [수정] MAC 대신 장치 이름(CFG["IRAS_DEV_NAME"]) 사용
             print("\n>>> [Step 5] iRAS 연동 테스트")
-            search_key = target_mac.replace(":", "")
-            iRAS_test.run_fen_setup_process(search_key, CFG["FEN_NAME"])
+            target_dev_name = CFG["IRAS_DEV_NAME"]
+            print(f"   -> iRAS 장치 검색어: {target_dev_name}")
+            iRAS_test.run_fen_setup_process(target_dev_name, CFG["FEN_NAME"])
         else:
             print("❌ 카메라 DHCP IP를 찾을 수 없습니다.")
             

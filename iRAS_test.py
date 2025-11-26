@@ -1,6 +1,4 @@
 import time
-import subprocess
-import os
 import ctypes
 import win32gui
 import win32com.client
@@ -10,490 +8,338 @@ import win32clipboard
 import uiautomation as auto
 
 # ---------------------------------------------------------
-# 🖥️ 다중 모니터/DPI 좌표 보정
+# ⚙️ [설정 및 상수]
 # ---------------------------------------------------------
-try:
-    ctypes.windll.user32.SetProcessDPIAware()
+TITLE_MAIN = "IDIS Center Remote Administration System"
+TITLE_SETUP = "IDIS Center 설정"
+TITLE_MODIFY = "장치 수정"
+
+# UI 요소 ID (AutomationId)
+ID_DEV_SEARCH_INPUT = "101"     # 설정창 > 장치 검색
+ID_DEV_LIST = "1000"            # 설정창 > 장치 리스트
+ID_ADDR_TYPE_COMBO = "1195"     # 수정창 > 주소 타입 콤보박스
+ID_FEN_INPUT = "22047"          # 수정창 > FEN 이름 입력
+ID_TEST_BTN = "22132"           # 수정창 > 연결 테스트 버튼
+ID_OK_BTN = "1"                 # 확인 버튼 (공통)
+ID_SURVEILLANCE_PANE = "59648"  # 감시 화면 Pane
+ID_SAVE_CLIP_BTN = "2005"       # 재생 화면 > 저장 버튼
+
+# 마우스 상대 좌표 (우클릭 메뉴 위치)
+COORD_MENU_MODIFY = (50, 20)    # 장치 수정
+COORD_MENU_REMOTE = (50, 45)    # 원격 설정
+COORD_MENU_FW_UP = (50, 70)     # 펌웨어 업그레이드
+COORD_MENU_PLAYBACK = (50, 100) # 녹화 영상 검색
+COORD_MENU_PTZ = (50, 125)      # PTZ 제어
+COORD_MENU_COLOR = (50, 175)    # 컬러 제어
+COORD_MENU_ALARM = (50, 250)    # 알람 출력 제어
+COORD_ALARM_ON = (150, 0)       # 알람 > 켜기 (상대좌표)
+COORD_CLIP_COPY = (30, 0)       # 클립 복사 메뉴
+
+# DPI 인식
+try: ctypes.windll.user32.SetProcessDPIAware()
 except: pass
 
 # ---------------------------------------------------------
-# [설정 상수]
+# 🤖 [Class] iRAS 컨트롤러 (통합)
 # ---------------------------------------------------------
-WAD_PATH = r"C:\Program Files (x86)\Windows Application Driver\WinAppDriver.exe"
-MAIN_WINDOW_TITLE = "IDIS Center Remote Administration System"
-SETUP_WINDOW_TITLE = "IDIS Center 설정"
-MODIFY_WINDOW_TITLE = "장치 수정"
+class IRASController:
+    def __init__(self):
+        self.shell = win32com.client.Dispatch("WScript.Shell")
 
-TARGET_DEVICE = "104_T6831"
-SURVEILLANCE_SCREEN_ID = "59648"
-SAVE_BUTTON_ID = "2005"
-
-# 좌표 설정
-COORD_DEVICE_MODIFY = (50, 20)
-COORD_REMOTE_SETUP = (50, 45)
-COORD_FW_UPGRADE = (50, 70)
-COORD_PLAYBACK = (50, 100)      
-COORD_PTZ_CONTROL = (50, 125)   
-COORD_COLOR_CONTROL = (50, 175) 
-COORD_ALARM_PARENT = (50, 250)
-DELTA_ALARM_ON = (150, 0)
-COORD_CLIP_COPY = (30, 0)
-
-# ---------------------------------------------------------
-# 🛠️ [Fix] 윈도우 핸들링 (팝업 창 포커스 문제 해결)
-# ---------------------------------------------------------
-def get_window_handle(window_name, force_focus=False):
-    """
-    창 핸들을 찾고 포커스를 맞춥니다.
-    :param force_focus: True면 '최소화->복구' 트릭을 사용하여 강제로 포커스를 뺏어옵니다.
-                        (브라우저에서 iRAS 메인으로 전환할 때만 True 사용)
-    """
-    hwnd = win32gui.FindWindow(None, window_name)
-    
-    # 1. 못 찾았을 경우 EnumWindows로 재탐색
-    if not hwnd:
-        def callback(h, _):
-            if win32gui.IsWindowVisible(h) and window_name in win32gui.GetWindowText(h):
-                nonlocal hwnd; hwnd = h; return False
-            return True
-        try: win32gui.EnumWindows(callback, None)
-        except: pass
+    # --- [내부 유틸] ---
+    def _get_handle(self, title, force_focus=False):
+        """창 핸들 찾기 및 강력한 포커스 전환"""
+        hwnd = win32gui.FindWindow(None, title)
         
-    if hwnd:
-        try:
-            # 최소화 상태라면 일단 복구
-            if win32gui.IsIconic(hwnd): 
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-
-            # [핵심] 강제 포커싱 트릭은 force_focus=True일 때만 수행
-            if force_focus:
-                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                time.sleep(0.2)
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.2)
-            
-            # 일반적인 포커싱 시도
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception:
-            # 실패 시 Fallback (Alt키 입력으로 깨우기)
-            try:
-                shell = win32com.client.Dispatch("WScript.Shell")
-                shell.SendKeys('%')
-                win32gui.SetForegroundWindow(hwnd)
+        # 정확한 제목으로 못 찾으면 부분 일치 검색
+        if not hwnd: 
+            def callback(h, _):
+                if win32gui.IsWindowVisible(h) and title in win32gui.GetWindowText(h):
+                    nonlocal hwnd; hwnd = h
+            try: win32gui.EnumWindows(callback, None)
             except: pass
+
+        if hwnd:
+            try:
+                if win32gui.IsIconic(hwnd): 
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 
-    return hwnd
+                if force_focus:
+                    # [중요] 윈도우 포커스 락 해제를 위한 Alt 키 트릭
+                    self.shell.SendKeys('%')
+                    win32gui.SetForegroundWindow(hwnd)
+                    # UIA를 통한 2차 포커스 시도
+                    try: auto.ControlFromHandle(hwnd).SetFocus()
+                    except: pass
+            except: pass
+        return hwnd
 
-# ---------------------------------------------------------
-# 🛠️ [UIA] 유틸리티 함수
-# ---------------------------------------------------------
+    def _click(self, hwnd, auto_id, right_click=False, y_offset=None):
+        """UIA 요소 클릭"""
+        try:
+            win = auto.ControlFromHandle(hwnd)
+            elem = win.Control(AutomationId=auto_id)
+            if not elem.Exists(maxSearchSeconds=3): return False
+            
+            rect = elem.BoundingRectangle
+            cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
+            if y_offset: cy = int(rect.top + y_offset)
 
-def copy_text_to_clipboard(text):
-    """ 🆕 텍스트를 클립보드에 복사 (한글 깨짐 방지) """
-    try:
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-        win32clipboard.CloseClipboard()
+            win32api.SetCursorPos((cx, cy)); time.sleep(0.3)
+            flags = (win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP) if right_click else (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP)
+            win32api.mouse_event(flags[0], 0, 0, 0, 0); time.sleep(0.1)
+            win32api.mouse_event(flags[1], 0, 0, 0, 0)
+            return True
+        except: return False
+
+    def _input(self, hwnd, auto_id, text):
+        """입력 필드 값 넣기"""
+        if self._click(hwnd, auto_id):
+            time.sleep(0.2)
+            self.shell.SendKeys("^a{BACKSPACE}"); time.sleep(0.1)
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                self.shell.SendKeys("^v")
+                return True
+            except: pass
+        return False
+
+    def _click_relative(self, dx, dy):
+        """상대 좌표 클릭"""
+        cx, cy = win32api.GetCursorPos()
+        win32api.SetCursorPos((cx + dx, cy + dy)); time.sleep(0.3)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); time.sleep(0.1)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+    def _enter_setup(self):
+        """메인화면 -> 시스템(S) -> 설정(i) 진입"""
+        print("   [iRAS] 메인 화면 전환 및 설정 메뉴 진입...")
+        
+        # 1. 메인 창 찾기 및 강제 포커스
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd: 
+            print("❌ iRAS 메인 창을 찾을 수 없습니다.")
+            return None
+        
+        time.sleep(0.5) # 포커스 안정화
+
+        # 2. 메뉴 진입 시퀀스: Alt+S -> i -> Enter -> Enter
+        self.shell.SendKeys("%s")   # Alt + S (시스템 메뉴)
+        time.sleep(0.5)
+        
+        self.shell.SendKeys("i")    # i (설정)
+        time.sleep(0.5)
+        
+        self.shell.SendKeys("{ENTER}") # 확인 1
+        time.sleep(0.5)
+        
+        self.shell.SendKeys("{ENTER}") # 확인 2
+        time.sleep(2.0) # 창 뜨는 시간 대기
+        
+        # 3. 설정 창 핸들 반환
+        setup_hwnd = self._get_handle(TITLE_SETUP)
+        if setup_hwnd:
+            return setup_hwnd
+            
+        print("❌ 설정 창이 열리지 않았습니다.")
+        return None
+
+    def _return_to_watch(self):
+        """감시 탭 복귀"""
+        main_hwnd = self._get_handle(TITLE_MAIN)
+        if not main_hwnd: return
+        try:
+            win = auto.ControlFromHandle(main_hwnd)
+            tab = win.TabItemControl() # 첫 번째 탭(감시) 가정
+            if tab.Exists(maxSearchSeconds=1): tab.Click()
+        except: pass
+
+    # --- [기능 1] 권한 테스트 (Phase 1) ---
+    def run_permission_phase1(self, device_name):
+        print("\n🧪 [iRAS] Phase 1: 기능 차단 테스트 (FW, PTZ, Color, Alarm, Clip)...")
+        
+        # 1. 펌웨어 업그레이드 차단 확인
+        setup_hwnd = self._enter_setup()
+        if setup_hwnd:
+            self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_name)
+            if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+                self._click_relative(*COORD_MENU_FW_UP)
+                time.sleep(2.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
+            self._click(setup_hwnd, ID_OK_BTN) # 설정 닫기
+
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd: return False
+
+        # 2. 감시 화면 관련 차단 확인 (PTZ, Color, Alarm)
+        ops = [COORD_MENU_PTZ, COORD_MENU_COLOR]
+        for op in ops:
+            if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+                self._click_relative(*op)
+                time.sleep(1.5); self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+
+        # 3. 알람 출력
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+            self._click_relative(*COORD_MENU_ALARM); time.sleep(0.3)
+            self._click_relative(*COORD_ALARM_ON)
+            time.sleep(1.5); self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+
+        # 4. 클립 카피 (재생 -> 저장 -> 클립복사)
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+            self._click_relative(*COORD_MENU_PLAYBACK)
+            time.sleep(4.0)
+            if self._click(main_hwnd, ID_SAVE_CLIP_BTN):
+                time.sleep(1.0)
+                self._click_relative(*COORD_CLIP_COPY) # 저장 메뉴 내 상대 좌표
+                time.sleep(2.0); self.shell.SendKeys("{ENTER}")
+            self._return_to_watch() # 감시 복귀
+            
+        print("   ✅ Phase 1 완료")
         return True
-    except Exception as e:
-        print(f"   🔥 클립보드 복사 실패: {e}")
+
+    # --- [기능 2] 권한 테스트 (Phase 2) ---
+    def run_permission_phase2(self, device_name):
+        print("\n🧪 [iRAS] Phase 2: 설정/검색 차단 테스트...")
+        
+        # 1. 원격 설정 차단 확인
+        setup_hwnd = self._enter_setup()
+        if setup_hwnd:
+            self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_name)
+            if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+                self._click_relative(*COORD_MENU_REMOTE)
+                print("   [Wait] 팝업 대기 (5초)...")
+                time.sleep(5.0) # 차단 팝업 대기
+                self.shell.SendKeys("{ENTER}") # 팝업 닫기
+            self._click(setup_hwnd, ID_OK_BTN) # 설정 닫기
+
+        # 2. 녹화 영상 검색(재생) 차단 확인
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if main_hwnd and self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+            self._click_relative(*COORD_MENU_PLAYBACK)
+            time.sleep(2.0); self.shell.SendKeys("{ENTER}")
+            self._return_to_watch()
+
+        print("   ✅ Phase 2 완료")
+        return True
+
+    # --- [기능 3] FEN 설정 (자동화) ---
+    def setup_fen(self, device_search_key, fen_name):
+        """
+        iRAS에서 장치를 검색하고 FEN 정보를 입력하여 연결 테스트를 수행합니다.
+        """
+        print(f"\n🖥️ [iRAS] FEN 설정 시작 (검색어: {device_search_key}, FEN: {fen_name})")
+        
+        # 1. 설정창 진입
+        setup_hwnd = self._enter_setup()
+        if not setup_hwnd: return False
+
+        # 2. 장치 검색
+        print("   [iRAS] 장치 검색...")
+        self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_search_key)
+        time.sleep(1.5)
+        
+        # 3. 리스트에서 우클릭 -> 장치 수정
+        if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+            self._click_relative(*COORD_MENU_MODIFY)
+            time.sleep(2.0)
+        else:
+            print("❌ 장치 리스트 클릭 실패")
+            self._click(setup_hwnd, ID_OK_BTN) # 닫기
+            return False
+
+        modify_hwnd = self._get_handle(TITLE_MODIFY)
+        if not modify_hwnd: 
+            print("❌ '장치 수정' 창이 뜨지 않았습니다.")
+            return False
+
+        # 4. 네트워크 탭으로 이동 (탭 컨트롤의 오른쪽 영역 클릭 시도)
+        try:
+            win = auto.ControlFromHandle(modify_hwnd)
+            tab = win.TabItemControl()
+            if tab.Exists(maxSearchSeconds=2):
+                rect = tab.BoundingRectangle
+                # 탭의 오른쪽 끝에서 약간 더 오른쪽 클릭 (다음 탭 선택)
+                cx = rect.left + (rect.right - rect.left) * 1.5 
+                cy = (rect.top + rect.bottom) / 2
+                win32api.SetCursorPos((int(cx), int(cy)))
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(1.0)
+        except: pass
+
+        # 5. FEN 설정 (주소 유형 변경)
+        print("   [iRAS] 주소 유형 'FEN' 선택...")
+        win = auto.ControlFromHandle(modify_hwnd)
+        combo = win.ComboBoxControl(AutomationId=ID_ADDR_TYPE_COMBO)
+        if combo.Exists(maxSearchSeconds=2):
+            combo.Click(); time.sleep(0.5)
+            fen_item = auto.ListItemControl(Name="FEN")
+            if fen_item.Exists(maxSearchSeconds=1): fen_item.Click()
+        
+        # 6. FEN 이름 입력
+        print(f"   [iRAS] FEN 이름 입력: {fen_name}")
+        # 콤보박스 변경 직후라 포커스가 튈 수 있으니 명시적 클릭 후 입력
+        if not self._input(modify_hwnd, ID_FEN_INPUT, fen_name):
+            # 실패 시 에디트 컨트롤 다시 찾아 클릭 후 재시도
+            try: win.EditControl(AutomationId=ID_FEN_INPUT).Click()
+            except: pass
+            self._input(modify_hwnd, ID_FEN_INPUT, fen_name)
+
+        # 7. 연결 테스트
+        print("   [iRAS] 연결 테스트 실행...")
+        if self._click(modify_hwnd, ID_TEST_BTN):
+            print("   -> 테스트 진행 중 (3초 대기)...")
+            time.sleep(3.5) # 서버 응답 대기
+            print("   -> 결과 팝업 닫기 (Enter)")
+            self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+
+        # 8. 저장 및 종료
+        print("   [iRAS] 저장 및 설정 완료")
+        self._click(modify_hwnd, ID_OK_BTN); time.sleep(1.5) # 수정창 닫기
+        self._click(setup_hwnd, ID_OK_BTN) # 설정창 닫기
+        return True
+
+    # --- [기능 4] 연결 검증 ---
+    def verify_connection(self, expected_mode="TcpDirectExternal"):
+        print(f"\n🔍 [iRAS] 연결 모드 검증: {expected_mode}")
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd: return False
+        
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+            time.sleep(0.5)
+            self.shell.SendKeys("c") # Copy to clipboard
+            time.sleep(0.5)
+            
+            try:
+                win32clipboard.OpenClipboard()
+                content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                
+                if expected_mode in content:
+                    print(f"   🎉 검증 성공! ({expected_mode})")
+                    return True
+                else:
+                    print(f"   ❌ 검증 실패 (내용: {content[:30]}...)")
+            except: pass
         return False
     
-def uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
-    try:
-        window = auto.ControlFromHandle(window_handle)
-        target_elem = window.Control(AutomationId=automation_id)
-        if not target_elem.Exists(maxSearchSeconds=3): return False
-        rect = target_elem.BoundingRectangle
-        cx = int((rect.left + rect.right) / 2)
-        cy = int((rect.top + rect.bottom) / 2) if y_offset is None else int(rect.top + y_offset)
-        
-        win32api.SetCursorPos((cx, cy))
-        time.sleep(0.3)
-        
-        if is_right_click:
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-        else:
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-        return True
-    except: return False
-
-def uia_type_text(window_handle, automation_id, text):
-    """ 🆕 입력 방식 개선 (SendKeys -> Ctrl+V) """
-    try:
-        if uia_click_element(window_handle, automation_id):
-            time.sleep(0.5)
-            shell = win32com.client.Dispatch("WScript.Shell")
-            shell.SendKeys("^a{BACKSPACE}") 
-            time.sleep(0.2)
-            
-            # 한글 입력을 위해 클립보드 복사 -> 붙여넣기
-            copy_text_to_clipboard(text)
-            shell.SendKeys("^v")
-            return True
-        return False
-    except: return False
-
-def uia_click_network_tab_offset(window_handle):
-    try:
-        window = auto.ControlFromHandle(window_handle)
-        first_tab = window.TabItemControl()
-        if not first_tab.Exists(maxSearchSeconds=2): return False
-        rect = first_tab.BoundingRectangle
-        cx = int((rect.left + rect.right) / 2)
-        cy = int((rect.top + rect.bottom) / 2)
-        tx = cx + (rect.right - rect.left) + 5
-        win32api.SetCursorPos((tx, cy))
-        time.sleep(0.3)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-        time.sleep(0.1)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-        return True
-    except: return False
-
-def send_native_keys(keys):
-    win32com.client.Dispatch("WScript.Shell").SendKeys(keys)
-
-def click_relative_mouse(dx, dy):
-    cx, cy = win32api.GetCursorPos()
-    tx, ty = cx + dx, cy + dy
-    win32api.SetCursorPos((tx, ty))
-    time.sleep(0.3)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-    time.sleep(0.1)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
 def run_fen_setup_process(device_name_to_search, fen_name):
     """
-    [통합 시나리오]
-    1. iRAS 설정창 진입
-    2. 장치 검색 및 수정창 진입
-    3. 네트워크 탭 -> FEN 설정 -> 연결 테스트 -> 저장
-    4. 설정창 닫기
+    network_test.py에서 호출하는 진입점 함수
     """
-    print(f"\n🖥️ [iRAS] '{device_name_to_search}' FEN 설정 자동화 시작...")
+    controller = IRASController()
     
-    # 1. iRAS 메인 핸들 확보 (강제 포커스)
-    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE, force_focus=True)
-    if not main_hwnd:
-        print("❌ iRAS가 실행되어 있지 않습니다.")
+    # FEN 설정 자동화 실행
+    if not controller.setup_fen(device_name_to_search, fen_name):
+        print("🔥 [iRAS] FEN 설정 중 오류 발생")
         return False
-
-    # 2. 설정 창 열기 (단축키 시퀀스)
-    print("   [iRAS] 설정 창 진입 시도...")
-    send_native_keys("%s"); time.sleep(0.3)
-    send_native_keys("i"); time.sleep(0.3)
-    send_native_keys("{ENTER}"); time.sleep(0.3)
-    send_native_keys("{ENTER}")
-    time.sleep(3.0)
-
-    setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-    if not setup_hwnd:
-        print("❌ 설정 창을 찾을 수 없습니다.")
-        return False
-
-    # 3. 장치 검색 (ID: 101)
-    print(f"   [iRAS] 장치 검색: {device_name_to_search}")
-    uia_type_text(setup_hwnd, "101", device_name_to_search)
-    time.sleep(1.5)
-
-    # 4. 장치 리스트(1000)에서 우클릭 -> 장치 수정(좌표) 클릭
-    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        click_relative_mouse(*COORD_DEVICE_MODIFY) # (50, 20)
-        print("   [Wait] 수정 창 대기...")
-        time.sleep(2.0)
-        
-        modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
-        if modify_hwnd:
-            print("   [iRAS] 장치 수정 창 진입 성공")
-            
-            # 5. 네트워크 탭으로 이동
-            if not uia_click_network_tab_offset(modify_hwnd):
-                print("   ❌ 네트워크 탭 이동 실패")
-                return False
-            time.sleep(1.0)
-
-            window = auto.ControlFromHandle(modify_hwnd)
-            
-            # 6. 주소 타입 변경 (콤보박스 ID: 1195 -> 'FEN')
-            print("   [iRAS] 주소 타입 'FEN' 변경 시도...")
-            combo = window.ComboBoxControl(AutomationId="1195")
-            if combo.Exists(maxSearchSeconds=3):
-                combo.Click() # 펼치기
-                time.sleep(0.5)
-                # 리스트에서 'FEN' 아이템 찾아 클릭 (전역 검색)
-                fen_item = auto.ListItemControl(Name="FEN")
-                if fen_item.Exists(maxSearchSeconds=2):
-                    fen_item.Click()
-                    print("   -> 'FEN' 선택 완료")
-                else:
-                    print("   ❌ 'FEN' 항목을 찾을 수 없습니다.")
-            else:
-                print("   ❌ 주소 타입 콤보박스(1195) 미발견")
-            time.sleep(1.0)
-
-            # 7. FEN 이름 입력 (DocumentControl ID: 22047)
-            print(f"   [iRAS] FEN 이름 입력: {fen_name}")
-            fen_input = window.DocumentControl(AutomationId="22047")
-            if not fen_input.Exists(maxSearchSeconds=1):
-                # DocumentControl로 안 잡히면 EditControl로 재시도
-                fen_input = window.EditControl(AutomationId="22047")
-            
-            if fen_input.Exists(maxSearchSeconds=2):
-                fen_input.Click()
-                time.sleep(0.2)
-                send_native_keys("^a{BACKSPACE}") # 기존 내용 삭제
-                time.sleep(0.2)
-                copy_text_to_clipboard(fen_name)
-                send_native_keys("^v")
-            else:
-                print("   ❌ FEN 입력 칸(22047)을 찾을 수 없습니다.")
-                return False
-
-            # 8. 연결 테스트 및 팝업 처리 (요청하신 방식)
-            print("   [iRAS] 연결 테스트 실행...")
-            # 연결 테스트 버튼 (ID: 22132)
-            if uia_click_element(modify_hwnd, "22132"):
-                print("   -> 테스트 버튼 클릭됨. 3초 대기...")
-                time.sleep(3.0)
-                print("   -> 결과 팝업 닫기 (ENTER)")
-                send_native_keys("{ENTER}") 
-                time.sleep(1.0)
-            else:
-                print("   ⚠️ 연결 테스트 버튼(22132) 클릭 실패")
-
-            # 9. 저장 (확인 버튼 ID: 1)
-            print("   [iRAS] 설정 저장...")
-            uia_click_element(modify_hwnd, "1") 
-            time.sleep(2.0)
-            print("   ✅ 장치 수정 및 저장 완료")
-
-        else:
-            print("❌ '장치 수정' 팝업이 뜨지 않았습니다.")
-            return False
-    else:
-        print("❌ 장치 리스트 클릭 실패")
-        return False
-
-    # 10. 설정 창 닫기 (확인 버튼 ID: 1)
-    print("   [iRAS] 설정 창 닫기...")
-    uia_click_element(setup_hwnd, "1")
+    
+    print("🎉 [iRAS] FEN 설정 프로세스 성공")
     return True
 
-def right_click_surveillance_screen(window_handle):
-    print(f"   [UIA] 감시 화면 탐색 중...")
-    try:
-        window = auto.ControlFromHandle(window_handle)
-        target_pane = window.PaneControl(AutomationId=SURVEILLANCE_SCREEN_ID)
-        
-        if target_pane.Exists(maxSearchSeconds=3):
-            rect = target_pane.BoundingRectangle
-            cx = int((rect.left + rect.right) / 2)
-            cy = int(rect.top + 100) 
-            if cy > rect.bottom: cy = int((rect.top + rect.bottom) / 2)
-            
-            win32api.SetCursorPos((cx, cy))
-            time.sleep(0.5)
-            
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(0.2)
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-            return True
-        return False
-    except: return False
-
-def return_to_watch_tab(main_hwnd):
-    print("   [iRAS] 감시 탭 복귀 시도...")
-    try:
-        window = auto.ControlFromHandle(main_hwnd)
-        first_tab = window.TabItemControl()
-        if first_tab.Exists(maxSearchSeconds=3):
-            rect = first_tab.BoundingRectangle
-            cx = int((rect.left + rect.right) / 2)
-            cy = int((rect.top + rect.bottom) / 2)
-            win32api.SetCursorPos((cx, cy))
-            time.sleep(0.3)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(2.0)
-            return True
-    except: pass
-    return False
-
-# ---------------------------------------------------------
-# 🧪 [Phases]
-# ---------------------------------------------------------
-def run_phase1_checks(main_hwnd, setup_hwnd):
-    print("\n   🧪 [Phase 1] 기능 차단 테스트 (Clip-Copy 등)...")
-    # 1. 펌웨어
-    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        click_relative_mouse(*COORD_FW_UPGRADE)
-        time.sleep(2.0)
-        send_native_keys("{ENTER}"); time.sleep(1.0)
-    
-    # 설정 닫기
-    uia_click_element(setup_hwnd, "1"); time.sleep(2.0)
-    if not main_hwnd: return False, "핸들 없음"
-
-    # 2. PTZ
-    if right_click_surveillance_screen(main_hwnd):
-        click_relative_mouse(*COORD_PTZ_CONTROL)
-        time.sleep(2.0)
-        send_native_keys("{ENTER}"); time.sleep(1.0)
-
-    # 3. 컬러
-    if right_click_surveillance_screen(main_hwnd):
-        click_relative_mouse(*COORD_COLOR_CONTROL)
-        time.sleep(2.0)
-        send_native_keys("{ENTER}"); time.sleep(1.0)
-
-    # 4. 알람
-    if right_click_surveillance_screen(main_hwnd):
-        click_relative_mouse(*COORD_ALARM_PARENT); time.sleep(0.5)
-        click_relative_mouse(*DELTA_ALARM_ON)
-        time.sleep(2.0)
-        send_native_keys("{ENTER}"); time.sleep(1.0)
-
-    # 5. 클립카피
-    if right_click_surveillance_screen(main_hwnd):
-        click_relative_mouse(*COORD_PLAYBACK)
-        time.sleep(5.0)
-        if uia_click_element(main_hwnd, SAVE_BUTTON_ID):
-            time.sleep(1.0)
-            click_relative_mouse(*COORD_CLIP_COPY)
-            time.sleep(3.0)
-            send_native_keys("{ENTER}"); time.sleep(1.0)
-            return_to_watch_tab(main_hwnd)
-    
-    return True, "Phase 1 완료"
-
-def run_phase2_checks(main_hwnd, setup_hwnd):
-    print("\n   🧪 [Phase 2] 설정/검색 차단 테스트...")
-    # 1. 원격 설정
-    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        click_relative_mouse(*COORD_REMOTE_SETUP)
-        print("   [Wait] 팝업 대기 (8초)...")
-        time.sleep(8.0)
-
-    # 설정 닫기
-    uia_click_element(setup_hwnd, "1"); time.sleep(2.0)
-
-    # 2. 재생
-    if right_click_surveillance_screen(main_hwnd):
-        click_relative_mouse(*COORD_PLAYBACK)
-        time.sleep(3.0)
-        send_native_keys("{ENTER}"); time.sleep(1.0)
-
-    return_to_watch_tab(main_hwnd)
-    return True, "Phase 2 완료"
-
-def restore_admin_login(device_name, admin_id, admin_pw):
-    print(f"\n🔄 [iRAS] 관리자({admin_id}) 로그인 복구 시작...")
-    # [Fix] 메인 창 찾을 때만 force_focus=True
-    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE, force_focus=True)
-    if not main_hwnd: return False
-
-    send_native_keys("%s"); time.sleep(0.5)
-    send_native_keys("i"); time.sleep(0.5)
-    send_native_keys("{ENTER}"); time.sleep(0.5)
-    send_native_keys("{ENTER}")
+if __name__ == "__main__":
+    print("3초 뒤 테스트 시작...")
     time.sleep(3)
-
-    # [Fix] 설정창은 force_focus=False (기본값)
-    setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-    if not setup_hwnd: return False
-
-    uia_type_text(setup_hwnd, "101", device_name)
-    time.sleep(1.0)
-    
-    if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-        click_relative_mouse(*COORD_DEVICE_MODIFY)
-        time.sleep(2.0)
-        
-        # [Fix] 수정창도 force_focus=False
-        modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
-        if modify_hwnd:
-            uia_click_network_tab_offset(modify_hwnd)
-            uia_type_text(modify_hwnd, "22043", admin_id)
-            uia_type_text(modify_hwnd, "22045", admin_pw)
-            
-            if uia_click_element(modify_hwnd, "22132"):
-                time.sleep(3.0)
-                send_native_keys("{ENTER}"); time.sleep(1.0)
-            uia_click_element(modify_hwnd, "1")
-            time.sleep(2.0)
-            
-    if setup_hwnd: uia_click_element(setup_hwnd, "1")
-    return True
-
-def run_iras_permission_check(device_name_to_search, user_id, user_pw, phase=1):
-    print(f"\n🖥️ [iRAS] 테스트 시작 (Phase: {phase})...")
-    try: subprocess.Popen([WAD_PATH], shell=False, creationflags=subprocess.CREATE_NEW_CONSOLE)
-    except: pass
-    time.sleep(2)
-
-    # [Fix] 메인 창 진입 시에만 강제 포커싱 사용
-    main_hwnd = get_window_handle(MAIN_WINDOW_TITLE, force_focus=True)
-    if not main_hwnd: return False, "iRAS 미실행"
-
-    if phase == 1:
-        print("   [iRAS] 로그인 시퀀스...")
-        send_native_keys("%s"); time.sleep(0.5)
-        send_native_keys("i"); time.sleep(0.5)
-        send_native_keys("{ENTER}"); time.sleep(0.5)
-        send_native_keys("{ENTER}")
-        time.sleep(3)
-
-        # [Fix] 팝업 창들은 부드럽게 핸들만 획득 (force_focus=False)
-        setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-        if not setup_hwnd: return False, "설정창 실패"
-
-        uia_type_text(setup_hwnd, "101", device_name_to_search)
-        time.sleep(1.0)
-        
-        if uia_click_element(setup_hwnd, "1000", is_right_click=True, y_offset=25):
-            click_relative_mouse(*COORD_DEVICE_MODIFY)
-            time.sleep(2.0)
-            
-            # [Fix]
-            modify_hwnd = get_window_handle(MODIFY_WINDOW_TITLE)
-            if modify_hwnd:
-                uia_click_network_tab_offset(modify_hwnd)
-                uia_type_text(modify_hwnd, "22043", user_id)
-                uia_type_text(modify_hwnd, "22045", user_pw)
-                
-                if uia_click_element(modify_hwnd, "22132"):
-                    time.sleep(3.0)
-                    send_native_keys("{ENTER}"); time.sleep(1.0)
-                uia_click_element(modify_hwnd, "1")
-                time.sleep(2.0)
-        else:
-            return False, "로그인 실패"
-
-        return run_phase1_checks(main_hwnd, setup_hwnd)
-
-    elif phase == 2:
-        send_native_keys("%s"); time.sleep(0.5)
-        send_native_keys("i"); time.sleep(0.5)
-        send_native_keys("{ENTER}"); time.sleep(0.5)
-        send_native_keys("{ENTER}")
-        time.sleep(3)
-        
-        # [Fix]
-        setup_hwnd = get_window_handle(SETUP_WINDOW_TITLE)
-        uia_type_text(setup_hwnd, "101", device_name_to_search)
-        time.sleep(1.0)
-        
-        return run_phase2_checks(main_hwnd, setup_hwnd)
-
-    return False, "Invalid Phase"
+    run_fen_setup_process("104_T6631", "FEN_TEST_01")
