@@ -14,7 +14,7 @@ CFG = {
     "AUTO_IP": "169.254.100.100",
     "CAM_IP": "10.0.131.104", "PORT": "80", "ID": "admin", "PW": "qwerty0-",
     "SCAN_NET": "10.0.17.0/24",
-    "FEN_SVR": "qa1.idis.co.kr", "FEN_NAME": "AUTO_TEST_CAM"
+    "FEN_SVR": "qa1.idis.co.kr", "FEN_NAME": "FEN테스트"
 }
 
 # 🛡️ 시스템 유틸리티

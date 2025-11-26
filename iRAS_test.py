@@ -6,6 +6,7 @@ import win32gui
 import win32com.client
 import win32api
 import win32con
+import win32clipboard
 import uiautomation as auto
 
 # ---------------------------------------------------------
@@ -86,6 +87,19 @@ def get_window_handle(window_name, force_focus=False):
 # ---------------------------------------------------------
 # 🛠️ [UIA] 유틸리티 함수
 # ---------------------------------------------------------
+
+def copy_text_to_clipboard(text):
+    """ 🆕 텍스트를 클립보드에 복사 (한글 깨짐 방지) """
+    try:
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+        win32clipboard.CloseClipboard()
+        return True
+    except Exception as e:
+        print(f"   🔥 클립보드 복사 실패: {e}")
+        return False
+    
 def uia_click_element(window_handle, automation_id, is_right_click=False, y_offset=None):
     try:
         window = auto.ControlFromHandle(window_handle)
@@ -110,12 +124,17 @@ def uia_click_element(window_handle, automation_id, is_right_click=False, y_offs
     except: return False
 
 def uia_type_text(window_handle, automation_id, text):
+    """ 🆕 입력 방식 개선 (SendKeys -> Ctrl+V) """
     try:
         if uia_click_element(window_handle, automation_id):
             time.sleep(0.5)
-            win32com.client.Dispatch("WScript.Shell").SendKeys("^a{BACKSPACE}") 
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shell.SendKeys("^a{BACKSPACE}") 
             time.sleep(0.2)
-            win32com.client.Dispatch("WScript.Shell").SendKeys(text)
+            
+            # 한글 입력을 위해 클립보드 복사 -> 붙여넣기
+            copy_text_to_clipboard(text)
+            shell.SendKeys("^v")
             return True
         return False
     except: return False
@@ -230,8 +249,8 @@ def run_fen_setup_process(device_name_to_search, fen_name):
                 time.sleep(0.2)
                 send_native_keys("^a{BACKSPACE}") # 기존 내용 삭제
                 time.sleep(0.2)
-                send_native_keys(fen_name)        # 새 이름 입력
-                time.sleep(0.5)
+                copy_text_to_clipboard(fen_name)
+                send_native_keys("^v")
             else:
                 print("   ❌ FEN 입력 칸(22047)을 찾을 수 없습니다.")
                 return False
