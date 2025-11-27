@@ -32,7 +32,7 @@ CFG = {
     "PW": "qwerty0-",
 
     # iRAS 테스트용 장치 이름 (MAC 대신 사용)
-    "IRAS_DEV_NAME": "104_T6831",
+    "IRAS_DEV_NAME": "104_T6631",
     
     # 스캔 범위 설정
     "SCAN_NET": "10.0.131.0/24", 
@@ -209,37 +209,36 @@ class CameraScanner:
         
         start_time = time.time()
         while time.time() - start_time < timeout:
-            # 1. ARP Table Cache Check
             try:
                 out = subprocess.check_output("arp -a", shell=True).decode('cp949', errors='ignore')
                 for line in out.splitlines():
                     if target_mac_dash in line.lower():
                         ip = line.split()[0]
                         if "169.254" in scan_range and "169.254" not in ip: continue
+                        if ip == "0.0.0.0": continue
                         print(f" (ARP Cache) 발견! -> {ip}")
                         return ip
             except: pass
 
-            # 2. ONVIF Probe
-            onvif_ips = CameraScanner.scan_onvif()
-            # ONVIF로 찾은 IP들 중 ARP를 통해 MAC 매칭되는지 확인하면 더 좋음 (생략 가능)
-
-            # 3. Active ARP Scan
+            CameraScanner.scan_onvif()
             found_ip = CameraScanner.scan_arp(target_mac, scan_range)
-            if found_ip:
+            if found_ip and found_ip != "0.0.0.0":
                 print(f" (Active ARP) 발견! -> {found_ip}")
                 return found_ip
             
-            # 4. Passive Sniffing (Link-Local이나 DHCP 갱신 시 유용)
-            found_ip = CameraScanner.sniff_target_packet(target_mac, timeout=3)
-            if found_ip:
-                # 찾은 IP가 스캔 범위에 맞는지 대략 확인 (DHCP 환경 고려)
-                print(f" (Sniffing) 발견! -> {found_ip}")
-                return found_ip
+            if "/16" in scan_range:
+                found_ip = CameraScanner.sniff_target_packet(target_mac, timeout=3)
+                if found_ip:
+                    # 💡 [수정] 스니핑된 IP가 169.254 대역인지 확인 (기존 IP가 잡히면 무시)
+                    if "169.254" in scan_range and "169.254" not in found_ip:
+                        # print(f" (Ignored: {found_ip})", end="") # 디버깅용
+                        pass
+                    else:
+                        print(f" (Sniffing) 발견! -> {found_ip}")
+                        return found_ip
 
             print(".", end="", flush=True)
             time.sleep(1)
-            
         print(" 실패 ❌")
         return None
 
@@ -320,14 +319,65 @@ class WebController:
             self.page.fill("#fen-server", CFG["FEN_SVR"])
             self.page.fill("#cam-name", CFG["FEN_NAME"])
             
+            # --- [수정된 부분] ---
+            print("   -> FEN 이름 확인 클릭...")
             self.page.click("#check-cam-name")
-            time.sleep(1)
-            handle_popup(self.page)
+            
+            # 서버 통신 대기 (최대 5초간 팝업 기다림)
+            # handle_popup 내부에 wait_for_selector가 있지만, 
+            # 네트워크 딜레이를 고려해 명시적으로 조금 기다리는 것이 안전함
+            time.sleep(2) 
+            if not handle_popup(self.page, timeout=5000):
+                print("   ⚠️ 팝업 처리 실패 -> Enter 키 시도")
+                self.page.keyboard.press("Enter")
+            
+            print("   -> 설정 저장...")
             self.page.click("#setup-apply")
-            handle_popup(self.page)
+            time.sleep(2)
+            if not handle_popup(self.page, timeout=5000):
+                self.page.keyboard.press("Enter")
+            # ---------------------
+
             print("   ✅ Web FEN 설정 완료")
         except Exception as e:
             print(f"   🔥 Web FEN Config Error: {e}")
+
+    def set_upnp(self, ip, enable=True):
+        """UPNP 설정 (포트/QoS 탭)"""
+        print(f"🌐 [Web] UPNP {'ON' if enable else 'OFF'} 설정: {ip}")
+        try:
+            self.page.goto(f"http://{ip}:{CFG['PORT']}/setup/setup.html")
+            self.page.wait_for_selector("#Page300_id", timeout=5000)
+            
+            self._click_and_wait("#Page300_id") # 네트워크
+            self._click_and_wait("#Page303_id") # 포트/QoS
+            
+            chk = self.page.is_checked("#use-upnp")
+            
+            # 상태 변경 필요 시 클릭
+            if enable and not chk:
+                self.page.click("label[for='use-upnp']")
+            elif not enable and chk:
+                self.page.click("label[for='use-upnp']")
+            
+            if enable:
+                print("   -> UPNP 확인 버튼 클릭...")
+                self.page.click("#check-upnp")
+                time.sleep(2) # 확인 팝업 대기
+                if not handle_popup(self.page):
+                    self.page.keyboard.press("Enter")
+            
+            print("   -> 저장...")
+            self.page.click("#setup-apply")
+            time.sleep(1)
+            if not handle_popup(self.page):
+                self.page.keyboard.press("Enter")
+                
+            print("   ✅ UPNP 설정 완료")
+            return True
+        except Exception as e:
+            print(f"   🔥 UPNP Config Error: {e}")
+            return False
 
 # =========================================================
 # 🕵️ [API] 카메라 설정 검증기
@@ -403,9 +453,9 @@ if __name__ == "__main__":
     else:
         print("⚠️ Auto-IP 탐색 실패 (DHCP 전환을 시도합니다)")
 
-    # [Step 3-1] 물리 테스트 (요청하신 부분 복원)
+    # [Step 3] 물리 테스트
     input("\n🚨 [ACTION] 사내망 랜선을 뽑고, 카메라를 재부팅한 후 Enter를 누르세요 >> ")
-    NetworkManager.set_dhcp() # PC를 DHCP(Auto-IP 대응)로 설정
+    NetworkManager.set_dhcp()
     NetworkManager.run_cmd("arp -d *")
     
     print(f"🔍 [Step 3] 물리적 Auto-IP 할당 확인 중...")
@@ -414,14 +464,14 @@ if __name__ == "__main__":
     if phy_auto_ip and "169.254" in phy_auto_ip:
         print(f"🎉 [물리 테스트] Auto-IP 확인 성공: {phy_auto_ip}")
     else:
-        print("⚠️ [물리 테스트] Auto-IP 탐색 실패 (재부팅 시간이 더 필요하거나 연결 문제)")
+        print("⚠️ [물리 테스트] Auto-IP 탐색 실패")
 
     # [Step 4] PC 네트워크 복구 및 DHCP IP 탐색
     input("\n🚨 [ACTION] 사내망 랜선을 다시 연결한 후 Enter를 누르세요 >> ")
     print("\n>>> [Step 4] PC 네트워크 복구 및 DHCP IP 탐색")
     NetworkManager.set_dhcp()
     
-    # PC가 IP를 받아오면 카메라 탐색 시작
+    new_dhcp_ip = None
     if NetworkManager.wait_for_dhcp("10."):
         NetworkManager.run_cmd("arp -d *")
         
@@ -442,12 +492,80 @@ if __name__ == "__main__":
             api.verify_fen_setting(CFG["FEN_SVR"])
 
             # 3. iRAS 자동화 (Step 5)
-            # 🔍 [수정] MAC 대신 장치 이름(CFG["IRAS_DEV_NAME"]) 사용
-            print("\n>>> [Step 5] iRAS 연동 테스트")
+            print("\n>>> [Step 5] iRAS 연동 테스트 (DirectExternal)")
             target_dev_name = CFG["IRAS_DEV_NAME"]
-            print(f"   -> iRAS 장치 검색어: {target_dev_name}")
-            iRAS_test.run_fen_setup_process(target_dev_name, CFG["FEN_NAME"])
+            
+            if iRAS_test.run_fen_setup_process(target_dev_name, CFG["FEN_NAME"]):
+                print("\n>>> [Step 6] iRAS 연결 모드 검증")
+                time.sleep(5)
+                if iRAS_test.run_fen_verification("TcpDirectExternal"):
+                    print("\n🎉 [Pass] TcpDirectExternal 연결 확인됨")
+                else:
+                    print("\n⚠️ [Fail] 연결 모드 불일치")
         else:
             print("❌ 카메라 DHCP IP를 찾을 수 없습니다.")
+
+    # [Step 7] UPNP 테스트 (DirectInternal)
+    if new_dhcp_ip:
+        input("\n🚨 [ACTION] 카메라와 PC를 공유기에 연결하고 Enter를 누르세요 (UPNP 테스트) >> ")
+        print("\n>>> [Step 7] UPNP 활성화 및 DirectInternal 검증")
+        
+        # Web UPNP 켜기
+        with sync_playwright() as p:
+            web = WebController(p)
+            web.set_upnp(new_dhcp_ip, enable=True)
+            web.close()
+        
+        print("   -> UPNP 갱신 대기 (10초)...")
+        time.sleep(10)
+        
+        if iRAS_test.run_fen_verification("TcpDirectInternal"):
+             print("\n🎉 [Pass] TcpDirectInternal 연결 확인됨")
+        else:
+             print("\n⚠️ [Fail] UPNP 연결 모드 불일치")
+
+    # [Step 8] UDP Hole Punching 테스트 (추가됨)
+    if new_dhcp_ip:
+        print("\n>>> [Step 8] UDP Hole Punching 테스트 준비")
+        print("   -> 설정을 위해 카메라 사전 구성 중...")
+        
+        # 사전 설정: IP DHCP & UPNP OFF (Web)
+        # 이미 DHCP 상태지만 확실하게 하고, UPNP를 끕니다.
+        with sync_playwright() as p:
+            web = WebController(p)
+            web.set_upnp(new_dhcp_ip, enable=False) # UPNP OFF
+            # web.set_link_local(new_dhcp_ip, enable=False) # DHCP 확인 (이미 되어있음)
+            web.close()
             
-    input("\n✅ 테스트 완료. 종료하려면 Enter...")
+        print("   ✅ 카메라 설정 완료 (DHCP, UPNP OFF)")
+        input("\n🚨 [ACTION] PC를 회사망에 연결하고, 카메라는 공유기에 연결한 뒤 Enter를 누르세요 >> ")
+        
+        print("\n   -> UDP Hole Punching 연결 모드 검증 시도...")
+        # 네트워크 환경이 바뀌었으므로 iRAS가 재접속할 시간을 충분히 줍니다.
+        time.sleep(15) 
+        
+        if iRAS_test.run_fen_verification("UdpHolePunching"):
+             print("\n🎉 [Pass] UdpHolePunching 연결 확인됨")
+        else:
+             print("\n⚠️ [Fail] UDP Hole Punching 연결 실패")
+    
+    # [Step 9] FEN Relay 테스트 (추가됨!)
+    if new_dhcp_ip:
+        print("\n>>> [Step 9] FEN Relay 테스트 (UDP Block)")
+        print("   ℹ️  현재 물리 연결 상태(PC=회사망, Cam=공유기)를 유지하세요.")
+        print("   ⚠️ [ACTION] 공유기 설정에서 'UDP Block'을 설정하세요.")
+        print("      - 조건: [내부<->외부], 포트 [1~15199, 15201~65535] 차단")
+        print("      - 참고: 카메라 설정은 이미 DHCP, UPNP OFF 상태입니다.")
+        
+        input("\n   설정이 완료되면 Enter를 누르세요 >> ")
+        
+        print("\n   -> Relay 모드 전환 대기 (약 30초)...")
+        time.sleep(30) 
+        
+        # 검증: "Relay" 문자열이 포함되어 있는지 확인
+        if iRAS_test.run_fen_verification("Relay"):
+             print("\n🎉 [Pass] FEN Relay 연결 확인됨")
+        else:
+             print("\n⚠️ [Fail] Relay 연결 실패 (공유기 설정 확인 필요)")
+
+    input("\n✅ 모든 테스트 완료. 종료하려면 Enter...")

@@ -6,6 +6,7 @@ import win32api
 import win32con
 import win32clipboard
 import uiautomation as auto
+import re
 
 # ---------------------------------------------------------
 # ⚙️ [설정 및 상수]
@@ -303,26 +304,60 @@ class IRASController:
 
     # --- [기능 4] 연결 검증 ---
     def verify_connection(self, expected_mode="TcpDirectExternal"):
-        print(f"\n🔍 [iRAS] 연결 모드 검증: {expected_mode}")
-        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
-        if not main_hwnd: return False
+        """감시 화면 우클릭(지정 좌표) -> 'c' 입력 -> 클립보드 확인"""
+        print(f"\n🔍 [iRAS] 연결 모드 검증 시작: '{expected_mode}' 기대함")
         
-        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd:
+            print("❌ iRAS 메인 창을 찾을 수 없습니다.")
+            return False
+        
+        # 1. 기존 클립보드 비우기
+        try:
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.CloseClipboard()
+        except: pass
+
+        # 2. 감시 패널 우클릭 (y_offset=100 적용)
+        # 권한 테스트에서 사용했던 '위쪽에서 100px 아래' 지점을 클릭합니다.
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True, y_offset=100):
             time.sleep(0.5)
-            self.shell.SendKeys("c") # Copy to clipboard
-            time.sleep(0.5)
+            
+            win32api.keybd_event(0x43, 0, 0, 0)  # Key Down
+            time.sleep(0.1)
+            win32api.keybd_event(0x43, 0, win32con.KEYEVENTF_KEYUP, 0) # Key Up
+            
+            print("   -> 우클릭 후 'C' 키 입력 완료. 클립보드 확인 중...")
+            time.sleep(1.0) # 복사될 시간 대기
             
             try:
                 win32clipboard.OpenClipboard()
-                content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                try:
+                    content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                except:
+                    content = "" # 복사 실패 시 빈 문자열
                 win32clipboard.CloseClipboard()
                 
+                if not content:
+                    print("⚠️ 클립보드가 비어있습니다. (복사 실패)")
+                    return False
+
                 if expected_mode in content:
-                    print(f"   🎉 검증 성공! ({expected_mode})")
+                    print(f"🎉 검증 성공! 연결 모드: {expected_mode}")
                     return True
                 else:
-                    print(f"   ❌ 검증 실패 (내용: {content[:30]}...)")
-            except: pass
+                    match = re.search(r"Fen - (.+)", content)
+                    actual = match.group(1) if match else "Unknown"
+                    print(f"❌ 검증 실패. 기대값: {expected_mode}, 실제값: {actual}")
+                    # print(f"   (내용: {content[:100]}...)")
+            except Exception as e:
+                print(f"⚠️ 클립보드 접근 오류: {e}")
+                try: win32clipboard.CloseClipboard()
+                except: pass
+        else:
+            print("❌ 감시 화면 클릭 실패")
+
         return False
     
 def run_fen_setup_process(device_name_to_search, fen_name):
@@ -339,7 +374,11 @@ def run_fen_setup_process(device_name_to_search, fen_name):
     print("🎉 [iRAS] FEN 설정 프로세스 성공")
     return True
 
+def run_fen_verification(expected_mode="TcpDirectExternal"):
+    """network_test.py에서 호출할 검증 함수"""
+    controller = IRASController()
+    return controller.verify_connection(expected_mode)
+
 if __name__ == "__main__":
-    print("3초 뒤 테스트 시작...")
-    time.sleep(3)
-    run_fen_setup_process("104_T6631", "FEN_TEST_01")
+    
+    run_fen_verification("TcpDirectExternal")
