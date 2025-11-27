@@ -11,19 +11,34 @@ def parse_api_response(response_text: str) -> dict:
 
 def handle_popup(page: Page, button_index=0, timeout=5000):
     """
-    범용 팝업 처리기
-    - 화면 최상단 팝업의 n번째 버튼을 클릭하고 닫힐 때까지 대기
-    - button_index: 0(첫번째, 보통 OK), 1(두번째, 보통 Cancel)
+    범용 팝업 처리기 (개선판)
     """
     try:
+        # 1. 팝업이 뜰 때까지 대기
         page.wait_for_selector(VISIBLE_DIALOG, state="visible", timeout=timeout)
+        
+        # 2. 최상단 팝업 찾기
         top_dialog = page.locator(VISIBLE_DIALOG).last
+        
+        # 3. 버튼 찾기 (jQuery UI 표준 구조)
         button = top_dialog.locator(DIALOG_BUTTONS).nth(button_index)
         
         if button.is_visible():
-            button.click()
-            top_dialog.wait_for(state="hidden", timeout=3000)
+            # force=True: 가려져 있어도 강제 클릭
+            button.click(force=True)
+            
+            # 4. 팝업이 사라질 때까지 대기
+            try:
+                top_dialog.wait_for(state="hidden", timeout=3000)
+            except:
+                pass # 닫혔으면 OK, 아니면 넘어가서 로직 진행
             return True
-        return False
+            
     except Exception:
-        return False
+        # 팝업 처리 실패 시, 엔터키로 Fallback
+        try:
+            page.keyboard.press("Enter")
+            return True
+        except: pass
+        
+    return False
