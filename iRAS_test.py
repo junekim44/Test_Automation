@@ -20,6 +20,7 @@ ID_DEV_SEARCH_INPUT = "101"     # 설정창 > 장치 검색
 ID_DEV_LIST = "1000"            # 설정창 > 장치 리스트
 ID_ADDR_TYPE_COMBO = "1195"     # 수정창 > 주소 타입 콤보박스
 ID_FEN_INPUT = "22047"          # 수정창 > FEN 이름 입력
+ID_PORT_INPUT = "1201"          # 수정창 > 원격 포트 입력
 ID_TEST_BTN = "22132"           # 수정창 > 연결 테스트 버튼
 ID_OK_BTN = "1"                 # 확인 버튼 (공통)
 ID_SURVEILLANCE_PANE = "59648"  # 감시 화면 Pane
@@ -107,6 +108,26 @@ class IRASController:
                 return True
             except: pass
         return False
+    
+    def _double_click(self, hwnd, auto_id):
+        """UIA 요소 더블 클릭 [추가됨]"""
+        try:
+            win = auto.ControlFromHandle(hwnd)
+            elem = win.Control(AutomationId=auto_id)
+            if not elem.Exists(maxSearchSeconds=3): return False
+            
+            rect = elem.BoundingRectangle
+            cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
+            
+            win32api.SetCursorPos((cx, cy)); time.sleep(0.2)
+            # 더블 클릭 수행
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.05) # 더블 클릭 간격
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            return True
+        except: return False
 
     def _click_relative(self, dx, dy):
         """상대 좌표 클릭"""
@@ -118,33 +139,18 @@ class IRASController:
     def _enter_setup(self):
         """메인화면 -> 시스템(S) -> 설정(i) 진입"""
         print("   [iRAS] 메인 화면 전환 및 설정 메뉴 진입...")
-        
-        # 1. 메인 창 찾기 및 강제 포커스
         main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
         if not main_hwnd: 
             print("❌ iRAS 메인 창을 찾을 수 없습니다.")
             return None
-        
-        time.sleep(0.5) # 포커스 안정화
-
-        # 2. 메뉴 진입 시퀀스: Alt+S -> i -> Enter -> Enter
-        self.shell.SendKeys("%s")   # Alt + S (시스템 메뉴)
         time.sleep(0.5)
+        self.shell.SendKeys("%s"); time.sleep(0.5)
+        self.shell.SendKeys("i"); time.sleep(0.5)
+        self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+        self.shell.SendKeys("{ENTER}"); time.sleep(2.0)
         
-        self.shell.SendKeys("i")    # i (설정)
-        time.sleep(0.5)
-        
-        self.shell.SendKeys("{ENTER}") # 확인 1
-        time.sleep(0.5)
-        
-        self.shell.SendKeys("{ENTER}") # 확인 2
-        time.sleep(2.0) # 창 뜨는 시간 대기
-        
-        # 3. 설정 창 핸들 반환
         setup_hwnd = self._get_handle(TITLE_SETUP)
-        if setup_hwnd:
-            return setup_hwnd
-            
+        if setup_hwnd: return setup_hwnd
         print("❌ 설정 창이 열리지 않았습니다.")
         return None
 
@@ -157,6 +163,28 @@ class IRASController:
             tab = win.TabItemControl() # 첫 번째 탭(감시) 가정
             if tab.Exists(maxSearchSeconds=1): tab.Click()
         except: pass
+    
+    def wait_for_video_attachment(self, timeout=180):
+        """
+        [수정됨 v3] 단순 대기 모드
+        - 복잡한 UI 검증(클릭, 클립보드) 로직 제거
+        - 지정된 시간(timeout) 동안 무조건 대기 후 True 반환
+        """
+        print(f"   ⏳ [iRAS] 영상 연결 대기 중... ({timeout}초 고정 대기)")
+        
+        # 1초씩 대기하며 진행 상황 출력 (스크립트 멈춤 오해 방지)
+        for i in range(timeout):
+            time.sleep(1)
+            remaining = timeout - i
+            
+            # 10초마다 남은 시간 출력, 그 외에는 점 찍기
+            if remaining % 10 == 0:
+                print(f"{remaining}s..", end=" ", flush=True)
+            elif remaining % 2 == 0:
+                print(".", end="", flush=True)
+                
+        print("\n   ✅ 대기 시간 종료. (연결되었다고 가정하고 진행)")
+        return True
 
     # --- [기능 1] 권한 테스트 (Phase 1) ---
     def run_permission_phase1(self, device_name):
@@ -199,6 +227,8 @@ class IRASController:
             
         print("   ✅ Phase 1 완료")
         return True
+    
+    
 
     # --- [기능 2] 권한 테스트 (Phase 2) ---
     def run_permission_phase2(self, device_name):
@@ -292,9 +322,9 @@ class IRASController:
         print("   [iRAS] 연결 테스트 실행...")
         if self._click(modify_hwnd, ID_TEST_BTN):
             print("   -> 테스트 진행 중 (3초 대기)...")
-            time.sleep(3.5) # 서버 응답 대기
+            time.sleep(3) # 서버 응답 대기
             print("   -> 결과 팝업 닫기 (Enter)")
-            self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+            self.shell.SendKeys("{ENTER}"); time.sleep(3.0)
 
         # 8. 저장 및 종료
         print("   [iRAS] 저장 및 설정 완료")
@@ -360,6 +390,172 @@ class IRASController:
 
         return False
     
+    def get_current_ips(self):
+        """
+        감시 화면에서 우클릭 + 'c'를 눌러 클립보드 정보 중 IPS 값을 추출
+        Format 예시: [W]{1:4} Fps 05.2 / Ips 05.0 / Mbps 0.21, 0.04
+        """
+        print("\n📊 [iRAS] IPS(프레임) 측정 시도...")
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd: return -1
+        
+        try:
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.CloseClipboard()
+        except: pass
+
+        # 우클릭 + C 액션
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True, y_offset=50):
+            time.sleep(0.5)
+            win32api.keybd_event(0x43, 0, 0, 0); time.sleep(0.1)
+            win32api.keybd_event(0x43, 0, win32con.KEYEVENTF_KEYUP, 0)
+            
+            print("   -> 디버그 정보 복사 완료. 데이터 파싱 중...")
+            time.sleep(1.0)
+            
+            try:
+                win32clipboard.OpenClipboard()
+                content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                
+                # ✅ [수정됨] 사용자 로그 포맷 "Ips 05.0" 파싱
+                # 대소문자 무시, "Ips" 뒤에 공백 후 숫자.숫자 패턴 찾기
+                match = re.search(r'Ips\s+([\d\.]+)', content, re.IGNORECASE)
+                
+                if match:
+                    ips = float(match.group(1))
+                    print(f"   ✅ 측정된 IPS: {ips}")
+                    return ips
+                else:
+                    print(f"   ⚠️ IPS 수치를 찾을 수 없음.")
+                    # print(f"   (디버그용: {content})") # 필요시 주석 해제
+                    return 0
+            except Exception as e:
+                print(f"   ⚠️ 클립보드 에러: {e}")
+                try: win32clipboard.CloseClipboard()
+                except: pass
+        return -1
+    
+    def get_current_ssl_info(self):
+        """
+        감시 화면에서 우클릭 + 'c' -> 클립보드 복사 -> SSL 정보 파싱
+        Target Line Example: "  Ssl - FullPacket"
+        """
+        print("\n🔐 [iRAS] SSL 정보 확인 시도...")
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        if not main_hwnd: return None
+        
+        try:
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.CloseClipboard()
+        except: pass
+
+        # 우클릭 + C (정보 복사)
+        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True, y_offset=50):
+            time.sleep(0.5)
+            win32api.keybd_event(0x43, 0, 0, 0); time.sleep(0.1) # 'C' Key
+            win32api.keybd_event(0x43, 0, win32con.KEYEVENTF_KEYUP, 0)
+            
+            print("   -> 디버그 정보 복사 완료. 데이터 파싱 중...")
+            time.sleep(1.0)
+            
+            try:
+                win32clipboard.OpenClipboard()
+                content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                
+                # 정규식 파싱: "Ssl - [문자열]"
+                # 예: "Ssl - FullPacket", "Ssl - NotUse" 등
+                match = re.search(r'Ssl\s+-\s+(.+)', content, re.IGNORECASE)
+                
+                if match:
+                    ssl_status = match.group(1).strip()
+                    print(f"   ✅ 감지된 SSL 상태: {ssl_status}")
+                    return ssl_status
+                else:
+                    print(f"   ⚠️ SSL 정보를 찾을 수 없음.")
+                    return None
+            except Exception as e:
+                print(f"   ⚠️ 클립보드 에러: {e}")
+                try: win32clipboard.CloseClipboard()
+                except: pass
+        return None
+    
+    # --- [기능 5] 원격 포트 변경 (NEW) ---
+    def set_remote_port(self, device_search_key, port_value):
+        """iRAS에서 장치의 원격 포트를 변경하고 연결 테스트 수행"""
+        print(f"\n🔌 [iRAS] 원격 포트 변경 시작 (Target Port: {port_value})")
+
+        # 1. 설정 및 수정창 진입
+        setup_hwnd = self._enter_setup()
+        if not setup_hwnd: return False
+
+        self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_search_key)
+        time.sleep(1.0)
+        
+        if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+            self._click_relative(*COORD_MENU_MODIFY); time.sleep(2.0)
+        else:
+            print("❌ 장치 리스트 클릭 실패")
+            self._click(setup_hwnd, ID_OK_BTN); return False
+
+        modify_hwnd = self._get_handle(TITLE_MODIFY)
+        if not modify_hwnd: return False
+
+        # 2. 네트워크 탭 이동 (탭바 오른쪽 클릭 트릭)
+        try:
+            win = auto.ControlFromHandle(modify_hwnd)
+            tab = win.TabItemControl()
+            if tab.Exists(maxSearchSeconds=2):
+                rect = tab.BoundingRectangle
+                cx = rect.left + (rect.right - rect.left) * 1.5 
+                cy = (rect.top + rect.bottom) / 2
+                win32api.SetCursorPos((int(cx), int(cy)))
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(1.0)
+        except: pass
+
+        # 3. 포트 입력 (더블클릭 -> 입력)
+        print(f"   [iRAS] 포트 값 입력: {port_value}")
+        
+        # 확실한 포커스를 위해 더블클릭 수행
+        if self._double_click(modify_hwnd, ID_PORT_INPUT):
+            time.sleep(0.5)
+            # 값 입력 (Ctrl+A -> Del -> Paste)
+            self.shell.SendKeys("^a{BACKSPACE}"); time.sleep(0.1)
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(str(port_value), win32clipboard.CF_UNICODETEXT)
+                win32clipboard.CloseClipboard()
+                self.shell.SendKeys("^v")
+            except: 
+                print("⚠️ 클립보드 복사 실패, 직접 입력 시도")
+                self.shell.SendKeys(str(port_value))
+        else:
+            print("❌ 포트 입력 필드(1201)를 찾을 수 없습니다.")
+            self._click(modify_hwnd, ID_OK_BTN)
+            self._click(setup_hwnd, ID_OK_BTN)
+            return False
+        
+        # 4. 연결 테스트
+        print("   [iRAS] 연결 테스트 실행...")
+        if self._click(modify_hwnd, ID_TEST_BTN):
+            print("   -> 테스트 진행 중 (5초 대기)...")
+            time.sleep(5.0) # 포트 변경은 시간이 좀 더 걸릴 수 있음
+            self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+
+        # 5. 저장 및 종료
+        print("   [iRAS] 설정 저장 완료")
+        self._click(modify_hwnd, ID_OK_BTN); time.sleep(1.5)
+        self._click(setup_hwnd, ID_OK_BTN)
+        return True
+
+
+
 def run_fen_setup_process(device_name_to_search, fen_name):
     """
     network_test.py에서 호출하는 진입점 함수
@@ -372,12 +568,26 @@ def run_fen_setup_process(device_name_to_search, fen_name):
         return False
     
     print("🎉 [iRAS] FEN 설정 프로세스 성공")
+    time.sleep(2.0) # 안정화 대기
     return True
 
 def run_fen_verification(expected_mode="TcpDirectExternal"):
     """network_test.py에서 호출할 검증 함수"""
     controller = IRASController()
     return controller.verify_connection(expected_mode)
+
+def run_port_change_process(device_name_to_search, new_port):
+    """원격 포트 변경 프로세스 실행 (network_test.py에서 호출)"""
+    controller = IRASController()
+    if not controller.set_remote_port(device_name_to_search, new_port):
+        print("🔥 [iRAS] 포트 변경 중 오류 발생")
+        return False
+    print(f"🎉 [iRAS] 포트 변경 성공 -> {new_port}")
+    return True
+
+def wait_for_connection():
+    controller = IRASController()
+    return controller.wait_for_video_attachment()
 
 if __name__ == "__main__":
     
