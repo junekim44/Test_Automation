@@ -7,6 +7,7 @@ import win32con
 import win32clipboard
 import uiautomation as auto
 import re
+import msvcrt
 
 # ---------------------------------------------------------
 # ⚙️ [설정 및 상수]
@@ -166,24 +167,38 @@ class IRASController:
     
     def wait_for_video_attachment(self, timeout=180):
         """
-        [수정됨 v3] 단순 대기 모드
-        - 복잡한 UI 검증(클릭, 클립보드) 로직 제거
-        - 지정된 시간(timeout) 동안 무조건 대기 후 True 반환
+        [수정됨 v4] 스킵 가능한 대기 모드
+        - 지정된 시간(timeout) 동안 대기
+        - 키보드 'Enter' 키를 누르면 즉시 남은 시간을 건너뛰고 진행
         """
-        print(f"   ⏳ [iRAS] 영상 연결 대기 중... ({timeout}초 고정 대기)")
+        print(f"   ⏳ [iRAS] 영상 연결 대기 중... ({timeout}초)")
+        print(f"   💡 (Tip: 영상이 이미 나왔다면 'Enter'를 눌러 즉시 건너뛸 수 있습니다)")
         
-        # 1초씩 대기하며 진행 상황 출력 (스크립트 멈춤 오해 방지)
+        # 입력 버퍼 비우기 (이전 입력이 남아있어서 바로 스킵되는 것 방지)
+        while msvcrt.kbhit():
+            msvcrt.getch()
+
         for i in range(timeout):
+            # 1. 키보드 입력 감지 (Windows 전용)
+            if msvcrt.kbhit():
+                # 눌린 키 값을 읽어옴
+                key = msvcrt.getch()
+                # 엔터(Enter) 키 코드 = b'\r'
+                if key == b'\r':
+                    print(f"\n   ⏩ [Skip] 사용자 입력으로 대기 시간을 건너뜁니다!")
+                    break
+
+            # 2. 1초 대기
             time.sleep(1)
             remaining = timeout - i
             
-            # 10초마다 남은 시간 출력, 그 외에는 점 찍기
+            # 3. 진행 상황 출력
             if remaining % 10 == 0:
                 print(f"{remaining}s..", end=" ", flush=True)
             elif remaining % 2 == 0:
                 print(".", end="", flush=True)
                 
-        print("\n   ✅ 대기 시간 종료. (연결되었다고 가정하고 진행)")
+        print("\n   ✅ 대기 종료. (다음 단계 진행)")
         return True
 
     # --- [기능 1] 권한 테스트 (Phase 1) ---
@@ -322,7 +337,7 @@ class IRASController:
         print("   [iRAS] 연결 테스트 실행...")
         if self._click(modify_hwnd, ID_TEST_BTN):
             print("   -> 테스트 진행 중 (3초 대기)...")
-            time.sleep(3) # 서버 응답 대기
+            time.sleep(5) # 서버 응답 대기
             print("   -> 결과 팝업 닫기 (Enter)")
             self.shell.SendKeys("{ENTER}"); time.sleep(3.0)
 
@@ -483,12 +498,104 @@ class IRASController:
                 except: pass
         return None
     
-    # --- [기능 5] 원격 포트 변경 (NEW) ---
-    def set_remote_port(self, device_search_key, port_value):
-        """iRAS에서 장치의 원격 포트를 변경하고 연결 테스트 수행"""
-        print(f"\n🔌 [iRAS] 원격 포트 변경 시작 (Target Port: {port_value})")
+    # --- [기능 6] FEN -> 고정 IP 복구 (NEW) ---
+    def restore_ip_connection(self, device_search_key, target_ip):
+        print(f"\n🔄 [iRAS] 고정 IP 연결 복구 시작 (Target: {target_ip})")
+        setup_hwnd = self._enter_setup()
+        if not setup_hwnd: return False
 
-        # 1. 설정 및 수정창 진입
+        self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_search_key)
+        time.sleep(1.0)
+        
+        if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+            self._click_relative(*COORD_MENU_MODIFY)
+            time.sleep(2.0)
+        else:
+            self._click(setup_hwnd, ID_OK_BTN)
+            return False
+
+        modify_hwnd = self._get_handle(TITLE_MODIFY)
+        if not modify_hwnd: return False
+
+        # 🌟 [추가된 부분] '네트워크' 탭 확실하게 클릭
+        print("   [iRAS] '네트워크' 탭으로 이동 시도...")
+        try:
+            win = auto.ControlFromHandle(modify_hwnd)
+            tab_control = win.TabControl() # 탭 컨트롤 찾기
+            
+            if tab_control.Exists(maxSearchSeconds=2):
+                # '네트워크' 탭 찾아서 클릭
+                network_tab = tab_control.TabItemControl(Name="네트워크")
+                if network_tab.Exists(maxSearchSeconds=1):
+                    network_tab.Click()
+                else:
+                    # 이름으로 못 찾으면 좌표로 클릭 (두 번째 탭 위치 추정)
+                    rect = tab_control.BoundingRectangle
+                    click_x = rect.left + 100 
+                    click_y = rect.top + 15
+                    win32api.SetCursorPos((int(click_x), int(click_y)))
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(1.5) # 탭 전환 대기
+        except Exception as e:
+            print(f"   ⚠️ 탭 이동 중 에러 (무시하고 진행): {e}")
+
+        # 주소 타입 변경
+        try:
+            win = auto.ControlFromHandle(modify_hwnd)
+            combo = win.ComboBoxControl(AutomationId=ID_ADDR_TYPE_COMBO)
+            if combo.Exists(maxSearchSeconds=2):
+                combo.Click(); time.sleep(1.0)
+                ip_item = auto.ListItemControl(Name="IP 주소")
+                if ip_item.Exists(maxSearchSeconds=2): ip_item.Click(); time.sleep(1.0)
+        except: pass
+
+        # 🌟 [수정 핵심] IP 입력 로직 강화
+        ip_parts = target_ip.split('.')
+        print(f"   [iRAS] IP 필드 입력: {ip_parts}")
+        
+        for i, part in enumerate(ip_parts):
+            field_id = f"Field{i}"
+            try:
+                edit = win.EditControl(AutomationId=field_id)
+                if edit.Exists(maxSearchSeconds=1):
+                    # 1. 클릭 후 기존 값 지우기
+                    edit.Click()
+                    time.sleep(0.2)
+                    self.shell.SendKeys("^a{BACKSPACE}")
+                    time.sleep(0.2)
+                    
+                    # 2. 값 입력 (문자열로 확실하게)
+                    # '0'인 경우에도 명확히 입력되도록 함
+                    self.shell.SendKeys(str(part))
+                    time.sleep(0.3) 
+                    
+                    # 3. 탭으로 이동 (입력 확정)
+                    self.shell.SendKeys("{TAB}")
+                    time.sleep(0.2)
+                else:
+                    print(f"   ⚠️ 입력칸 {field_id}를 찾을 수 없습니다.")
+            except Exception as e:
+                print(f"   ⚠️ IP 입력 중 예외: {e}")
+
+        print("   [iRAS] 연결 테스트 실행...")
+        if self._click(modify_hwnd, ID_TEST_BTN):
+            print("   -> 테스트 진행 중 (3초 대기)...")
+            time.sleep(5) # 서버 응답 대기
+            print("   -> 결과 팝업 닫기 (Enter)")
+            self.shell.SendKeys("{ENTER}"); time.sleep(3.0)
+
+        # 저장 및 종료
+        print("   -> 입력 완료. 저장...")
+        self._click(modify_hwnd, ID_OK_BTN); time.sleep(2.0)
+        self._click(setup_hwnd, ID_OK_BTN)
+        return True
+    
+    # [수정] 원격 포트 변경 (네트워크 탭 이동 + 리스트 더블클릭 강화)
+    def set_remote_port(self, device_search_key, port_value):
+        print(f"\n🔌 [iRAS] 원격 포트 설정 변경 시작 (Target: {port_value})")
+        
+        # 1. 설정창 진입 및 장치 검색
         setup_hwnd = self._enter_setup()
         if not setup_hwnd: return False
 
@@ -498,59 +605,74 @@ class IRASController:
         if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
             self._click_relative(*COORD_MENU_MODIFY); time.sleep(2.0)
         else:
-            print("❌ 장치 리스트 클릭 실패")
             self._click(setup_hwnd, ID_OK_BTN); return False
 
         modify_hwnd = self._get_handle(TITLE_MODIFY)
         if not modify_hwnd: return False
 
-        # 2. 네트워크 탭 이동 (탭바 오른쪽 클릭 트릭)
+        # 🌟 [핵심] '네트워크' 탭 클릭 (탭을 안 누르면 포트 리스트가 안 보임)
+        print("   [iRAS] '네트워크' 탭으로 이동 시도...")
         try:
             win = auto.ControlFromHandle(modify_hwnd)
-            tab = win.TabItemControl()
-            if tab.Exists(maxSearchSeconds=2):
-                rect = tab.BoundingRectangle
-                cx = rect.left + (rect.right - rect.left) * 1.5 
-                cy = (rect.top + rect.bottom) / 2
-                win32api.SetCursorPos((int(cx), int(cy)))
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                time.sleep(1.0)
+            tab_control = win.TabControl()
+            if tab_control.Exists(maxSearchSeconds=2):
+                # 이름으로 찾기 시도
+                network_tab = tab_control.TabItemControl(Name="네트워크")
+                if network_tab.Exists(maxSearchSeconds=1):
+                    network_tab.Click()
+                else:
+                    # 이름 못 찾으면 좌표로 클릭 (두 번째 탭 위치)
+                    rect = tab_control.BoundingRectangle
+                    win32api.SetCursorPos((int(rect.left + 100), int(rect.top + 15)))
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(1.5) # 탭 전환 대기
         except: pass
 
-        # 3. 포트 입력 (더블클릭 -> 입력)
-        print(f"   [iRAS] 포트 값 입력: {port_value}")
-        
-        # 확실한 포커스를 위해 더블클릭 수행
-        if self._double_click(modify_hwnd, ID_PORT_INPUT):
-            time.sleep(0.5)
-            # 값 입력 (Ctrl+A -> Del -> Paste)
-            self.shell.SendKeys("^a{BACKSPACE}"); time.sleep(0.1)
-            try:
-                win32clipboard.OpenClipboard()
-                win32clipboard.EmptyClipboard()
-                win32clipboard.SetClipboardText(str(port_value), win32clipboard.CF_UNICODETEXT)
-                win32clipboard.CloseClipboard()
-                self.shell.SendKeys("^v")
-            except: 
-                print("⚠️ 클립보드 복사 실패, 직접 입력 시도")
-                self.shell.SendKeys(str(port_value))
-        else:
-            print("❌ 포트 입력 필드(1201)를 찾을 수 없습니다.")
-            self._click(modify_hwnd, ID_OK_BTN)
-            self._click(setup_hwnd, ID_OK_BTN)
-            return False
-        
-        # 4. 연결 테스트
-        print("   [iRAS] 연결 테스트 실행...")
-        if self._click(modify_hwnd, ID_TEST_BTN):
-            print("   -> 테스트 진행 중 (5초 대기)...")
-            time.sleep(5.0) # 포트 변경은 시간이 좀 더 걸릴 수 있음
-            self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+        # 🌟 [핵심] 리스트에서 '원격 포트' 찾아 값 변경
+        try:
+            win = auto.ControlFromHandle(modify_hwnd)
+            # 리스트 아이템 찾기
+            port_item = win.ListItemControl(Name="원격 포트")
+            
+            # 혹시 이름이 다를 경우 대비 (정규식)
+            if not port_item.Exists(maxSearchSeconds=1):
+                 port_item = win.ListItemControl(RegexName=".*원격.*")
 
-        # 5. 저장 및 종료
-        print("   [iRAS] 설정 저장 완료")
-        self._click(modify_hwnd, ID_OK_BTN); time.sleep(1.5)
+            if port_item.Exists(maxSearchSeconds=2):
+                print(f"   -> '원격 포트' 항목 발견. {port_value} 입력 시도...")
+                
+                # 아이템 중앙 좌표 계산
+                rect = port_item.BoundingRectangle
+                cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
+                
+                # 더블 클릭 (입력창 활성화)
+                win32api.SetCursorPos((cx, cy)); time.sleep(0.2)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(1.0) # 입력창 뜰 때까지 대기
+
+                # 값 입력
+                self.shell.SendKeys(str(port_value))
+                time.sleep(0.5)
+                self.shell.SendKeys("{ENTER}") # 입력 확정
+                time.sleep(1.0)
+            else:
+                print("❌ '원격 포트' 리스트 항목을 찾을 수 없습니다. (탭 이동 실패?)")
+                self._click(modify_hwnd, ID_OK_BTN)
+                self._click(setup_hwnd, ID_OK_BTN)
+                return False
+
+        except Exception as e:
+            print(f"⚠️ 포트 변경 UI 에러: {e}")
+            return False
+
+        # 저장 및 닫기
+        print("   [iRAS] 설정 저장")
+        self._click(modify_hwnd, ID_OK_BTN); time.sleep(2.0)
         self._click(setup_hwnd, ID_OK_BTN)
         return True
 
@@ -588,6 +710,19 @@ def run_port_change_process(device_name_to_search, new_port):
 def wait_for_connection():
     controller = IRASController()
     return controller.wait_for_video_attachment()
+
+def run_restore_ip_process(device_name, ip_address):
+    """
+    FEN 테스트 종료 후 IP 연결 모드로 복구하는 함수
+    (network_test.py에서 호출)
+    """
+    controller = IRASController()
+    if controller.restore_ip_connection(device_name, ip_address):
+        print("🎉 [iRAS] IP 모드 복구 성공")
+        return True
+    else:
+        print("🔥 [iRAS] IP 모드 복구 실패")
+        return False
 
 if __name__ == "__main__":
     
