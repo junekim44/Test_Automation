@@ -591,88 +591,6 @@ class IRASController:
         self._click(setup_hwnd, ID_OK_BTN)
         return True
     
-    def set_remote_port(self, device_search_key, port_value):
-        print(f"\n🔌 [iRAS] 원격 포트 설정 변경 시작 (Target: {port_value})")
-        
-        # 1. 설정창 진입 및 장치 검색
-        setup_hwnd = self._enter_setup()
-        if not setup_hwnd: return False
-
-        self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_search_key)
-        time.sleep(1.0)
-        
-        if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
-            self._click_relative(*COORD_MENU_MODIFY); time.sleep(2.0)
-        else:
-            self._click(setup_hwnd, ID_OK_BTN); return False
-
-        modify_hwnd = self._get_handle(TITLE_MODIFY)
-        if not modify_hwnd: return False
-
-        # 2. '네트워크' 탭 클릭 (안정성을 위해 유지)
-        try:
-            win = auto.ControlFromHandle(modify_hwnd)
-            tab_control = win.TabControl()
-            if tab_control.Exists(maxSearchSeconds=2):
-                network_tab = tab_control.TabItemControl(Name="네트워크")
-                if network_tab.Exists(maxSearchSeconds=1):
-                    network_tab.Click() # UIA 네이티브 클릭 사용
-                else:
-                    # 탭을 못 찾으면 좌표 클릭 (좌표 보정 포함)
-                    rect = tab_control.BoundingRectangle
-                    cx = int(rect.left + 100)
-                    cy = int(rect.top + 15)
-                    # win32api 대신 uiautomation의 Click 사용 권장 (다중 모니터 호환)
-                    auto.Click(cx, cy)
-                time.sleep(1.5)
-        except: pass
-
-        # 🌟 [수정 핵심] 마우스 클릭 없이 '값 직접 주입' (ValuePattern)
-        print(f"   [iRAS] 포트 입력창(ID: 1201) 값 변경 시도...")
-        
-        try:
-            win = auto.ControlFromHandle(modify_hwnd)
-            # Inspector에서 확인된 ID 1201 사용
-            port_edit = win.EditControl(AutomationId="1201")
-            
-            if port_edit.Exists(maxSearchSeconds=3):
-                # 방법 1: ValuePattern을 이용해 값 직접 설정 (클릭 X)
-                # Inspector에 IsValuePatternAvailable: true 라고 되어 있으므로 가능합니다.
-                try:
-                    print(f"   -> [Method 1] ValuePattern으로 값 설정: {port_value}")
-                    port_edit.GetValuePattern().SetValue(str(port_value))
-                except Exception as e:
-                    print(f"   ⚠️ ValuePattern 실패({e}), LegacyPattern 시도...")
-                    # 방법 2: LegacyPattern (백업)
-                    port_edit.GetLegacyIAccessiblePattern().SetValue(str(port_value))
-
-                time.sleep(0.5)
-                
-                # [중요] 값이 들어간 후, 엔터를 쳐서 앱이 인식하게 함
-                # 포커스를 확실히 주기 위해 UIA 네이티브 클릭 한번 수행
-                port_edit.Click() 
-                time.sleep(0.2)
-                self.shell.SendKeys("{ENTER}")
-                time.sleep(1.0)
-                print("   -> 값 입력 및 엔터 완료")
-                
-            else:
-                print("❌ 포트 입력창(ID: 1201)을 찾을 수 없습니다. (탭 이동 실패?)")
-                self._click(modify_hwnd, ID_OK_BTN)
-                self._click(setup_hwnd, ID_OK_BTN)
-                return False
-
-        except Exception as e:
-            print(f"⚠️ 포트 변경 중 에러 발생: {e}")
-            return False
-
-        # 저장 및 닫기
-        print("   [iRAS] 설정 저장")
-        self._click(modify_hwnd, ID_OK_BTN); time.sleep(2.0)
-        self._click(setup_hwnd, ID_OK_BTN)
-        return True
-
-
 
 def run_fen_setup_process(device_name_to_search, fen_name):
     """
@@ -694,18 +612,185 @@ def run_fen_verification(expected_mode="TcpDirectExternal"):
     controller = IRASController()
     return controller.verify_connection(expected_mode)
 
-def run_port_change_process(device_name_to_search, new_port):
-    """원격 포트 변경 프로세스 실행 (network_test.py에서 호출)"""
+def run_port_change_process(device_name, target_port, target_ip="10.0.131.104"):
+    """
+    [수정됨] IDIS Center 설정 창 진입부터 포트 변경, 검색 검증, 종료까지 수행
+    1. IRASController를 이용해 설정 창 열기 (자동 진입)
+    2. UIA를 이용해 장치 검색 및 포트 변경 수행
+    3. 검색 결과 검증 후 모든 창 닫기
+    """
+    print(f"🔌 [iRAS] 장치 검색을 통한 포트 변경 시작 (Target: {target_ip}:{target_port})")
+    
+    # 1. 컨트롤러 생성 및 설정 창 진입 (메인 화면 -> 설정 메뉴)
     controller = IRASController()
-    if not controller.set_remote_port(device_name_to_search, new_port):
-        print("🔥 [iRAS] 포트 변경 중 오류 발생")
+    setup_hwnd = controller._enter_setup() # 기존 로직 활용하여 창 열기
+    
+    if not setup_hwnd:
+        print("   ❌ 설정 창 진입 실패")
         return False
-    print(f"🎉 [iRAS] 포트 변경 성공 -> {new_port}")
-    return True
 
-def wait_for_connection():
+    try:
+        # 2. UIA로 'IDIS Center 설정' 창 제어 시작
+        # 이미 열려있는 창을 잡습니다.
+        setting_window = auto.WindowControl(searchDepth=1, Name="IDIS Center 설정")
+        if not setting_window.Exists(3):
+            print("   ❌ 'IDIS Center 설정' 창을 찾을 수 없습니다 (UIA).")
+            return False
+        
+        setting_window.SetFocus()
+        time.sleep(0.5)
+
+        # -----------------------------------------------------------
+        # Step 1. '+' 버튼 클릭 (장치 검색 진입) [AutomationId: 22023]
+        # -----------------------------------------------------------
+        print("   [1] '+' 버튼 클릭 (장치 검색 진입)...")
+        plus_btn = setting_window.ButtonControl(AutomationId="22023", Name="+")
+        if not plus_btn.Exists(2):
+            print("   ❌ '+' 버튼을 찾을 수 없습니다.")
+            return False
+        plus_btn.Click()
+        time.sleep(1) # 대화상자 로딩 대기
+
+        # '장치 검색' 대화상자 핸들링
+        search_dialog = setting_window.WindowControl(searchDepth=1, Name="장치 검색")
+        if not search_dialog.Exists(3):
+            print("   ❌ '장치 검색' 대화상자가 열리지 않았습니다.")
+            return False
+
+        # -----------------------------------------------------------
+        # Step 2. IP 주소 입력 (Field 0~3, 4~7)
+        # -----------------------------------------------------------
+        print(f"   [2] IP 주소 입력: {target_ip}...")
+        ip_parts = target_ip.split('.')
+        if len(ip_parts) != 4:
+            print("   ❌ IP 주소 형식이 올바르지 않습니다.")
+            return False
+
+        for i in range(4):
+            # 시작 IP 입력
+            start_edit = search_dialog.EditControl(AutomationId=f"Field{i}")
+            if start_edit.Exists(0.5): 
+                start_edit.Click()
+                start_edit.SendKeys('{Ctrl}a{Delete}') 
+                start_edit.SendKeys(ip_parts[i])
+            
+            # 끝 IP 입력 (동일하게 입력하여 단일 검색 유도)
+            end_edit = search_dialog.EditControl(AutomationId=f"Field{i+4}")
+            if end_edit.Exists(0.1): 
+                end_edit.Click()
+                end_edit.SendKeys('{Ctrl}a{Delete}')
+                end_edit.SendKeys(ip_parts[i])
+                
+        time.sleep(0.5)
+
+        # -----------------------------------------------------------
+        # Step 3. '포트...' 버튼 클릭 [AutomationId: 22034]
+        # -----------------------------------------------------------
+        print("   [3] '포트...' 버튼 클릭...")
+        port_btn = search_dialog.ButtonControl(AutomationId="22034", Name="포트...")
+        port_btn.Click()
+        time.sleep(1) 
+
+        # '포트 설정' 대화상자 핸들링
+        port_dialog = search_dialog.WindowControl(searchDepth=1, Name="포트 설정")
+        if not port_dialog.Exists(3):
+            print("   ❌ '포트 설정' 대화상자가 열리지 않았습니다.")
+            return False
+
+        # -----------------------------------------------------------
+        # Step 4. 포트 번호 입력 및 확인 [AutomationId: 26468]
+        # -----------------------------------------------------------
+        print(f"   [4] 포트 번호 입력: {target_port}...")
+        port_edit = port_dialog.EditControl(AutomationId="26468")
+        if port_edit.Exists(1):
+            port_edit.Click()
+            port_edit.SendKeys('{Ctrl}a{Delete}')
+            port_edit.SendKeys(str(target_port))
+        else:
+            print("   ⚠️ 포트 입력창을 찾을 수 없습니다.")
+        
+        time.sleep(0.5)
+        # 확인 버튼 클릭
+        port_dialog.ButtonControl(AutomationId="1", Name="확인").Click()
+        time.sleep(0.5)
+
+        # -----------------------------------------------------------
+        # Step 5. '검색 시작' 클릭 및 결과 대기 [AutomationId: 22031]
+        # -----------------------------------------------------------
+        print("   [5] '검색 시작' 클릭 및 결과 검증...")
+        search_dialog.ButtonControl(AutomationId="22031", Name="검색 시작").Click()
+        
+        found_device = False
+        for _ in range(10): # 10초 대기
+            time.sleep(1)
+            print(".", end="")
+            # 결과 텍스트 확인
+            result_text_ctrl = search_dialog.TextControl(AutomationId="1194")
+            if result_text_ctrl.Exists(0.5):
+                result_msg = result_text_ctrl.Name
+                if "총 1개의 장치가" in result_msg:
+                    print(f"\n   ✅ 검색 성공: {result_msg}")
+                    found_device = True
+                    break
+                elif "장치가 없습니다" in result_msg:
+                    print(f"\n   ❌ 검색 실패: {result_msg}")
+                    break
+        
+        if not found_device:
+            print("\n   ⚠️ 타임아웃 또는 장치 미발견")
+            # 실패 시에도 닫기 시도
+            if search_dialog.Exists():
+                search_dialog.ButtonControl(AutomationId="1", Name="닫기").Click()
+            # 메인 창도 닫아줌
+            if setting_window.Exists():
+                setting_window.ButtonControl(AutomationId="1", Name="확인").Click()
+            return False
+
+        # -----------------------------------------------------------
+        # Step 6. 장치 검색 창 '닫기' [AutomationId: 1]
+        # -----------------------------------------------------------
+        print("   [6] 장치 검색 창 닫기...")
+        search_dialog.ButtonControl(AutomationId="1", Name="닫기").Click()
+        
+        # 창이 사라질 때까지 대기 (최대 3초)
+        if not search_dialog.Disappears(3): 
+            print("   ⚠️ 장치 검색 창이 아직 닫히지 않았습니다 (진행 계속)...")
+
+        # -----------------------------------------------------------
+        # Step 7. 메인 설정 창 '확인' 클릭 (최종 저장/종료) [AutomationId: 1]
+        # -----------------------------------------------------------
+        print("   [7] 메인 설정 창 저장 및 닫기...")
+        
+        # 설정 창이 활성화되어 있는지 확인
+        if setting_window.Exists(1):
+            setting_window.SetFocus()
+            main_ok_btn = setting_window.ButtonControl(AutomationId="1", Name="확인")
+            
+            if not main_ok_btn.Exists(1):
+                main_ok_btn = setting_window.ButtonControl(Name="확인")
+                
+            if main_ok_btn.Exists(2):
+                main_ok_btn.Click()
+                print("   🎉 iRAS 포트 변경 및 설정 완료")
+                return True
+            else:
+                print("   ⚠️ 메인 설정 창의 '확인' 버튼을 찾을 수 없습니다.")
+                return False
+        else:
+            print("   ⚠️ 메인 설정 창이 이미 닫혔거나 찾을 수 없습니다.")
+            return True # 이미 닫혔다면 성공으로 간주
+
+    except Exception as e:
+        print(f"   🔥 [iRAS Error] 프로세스 중 오류: {e}")
+        return False
+
+def wait_for_connection(timeout=180):
+    """
+    영상 연결 대기 함수 (timeout 인자 추가)
+    """
     controller = IRASController()
-    return controller.wait_for_video_attachment()
+    # 받아온 timeout 값을 내부 메서드에 전달
+    return controller.wait_for_video_attachment(timeout=timeout)
 
 def run_restore_ip_process(device_name, ip_address):
     """
@@ -722,4 +807,4 @@ def run_restore_ip_process(device_name, ip_address):
 
 if __name__ == "__main__":
     
-    run_fen_verification("TcpDirectExternal")
+    run_port_change_process("104_T6631", "8016")

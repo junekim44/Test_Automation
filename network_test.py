@@ -903,8 +903,7 @@ def run_integrated_network_test(
         #     if _run_web_action(_action_webguard_login, fen_url, CFG["ID"], CFG["PW"]):
         #         print("🎉 [Pass] WebGuard Login")
     
-        # [Step 15] 복구 (먼저 실행하여 Static 상태로 만듦)
-        # new_dhcp_ip = "None"
+        # # [Step 15] 복구 (먼저 실행하여 Static 상태로 만듦)
         # if new_dhcp_ip:
         #     print("\n>>> [Step 15] 전체 네트워크 설정 복구 (Web & iRAS -> Static IP)")
         #     restore_ip = CFG["CAM_IP"]       
@@ -944,7 +943,6 @@ def run_integrated_network_test(
             
             test_http_port = "8080"
             test_watch_port = "9200" 
-            default_iras_port = "8016"
             
             try:
                 print(f"\n   [11-1] 카메라 포트 변경 API 전송 및 검증...")
@@ -979,7 +977,7 @@ def run_integrated_network_test(
                     print(f"   ✅ Socket Check: {test_watch_port} is OPEN")
                     
                     print(f"   -> iRAS 설정을 {test_watch_port}로 변경...")
-                    if iRAS_test.run_port_change_process(CFG["IRAS_DEV_NAME"], test_watch_port):
+                    if iRAS_test.run_port_change_process(CFG["IRAS_DEV_NAME"], test_watch_port, target_ip=current_test_ip):
                         print("   -> iRAS 설정 변경 완료. 영상 연결 대기...")
                         
                         if iRAS_test.wait_for_connection(timeout=60): 
@@ -1025,15 +1023,6 @@ def run_integrated_network_test(
                 else:
                     print("   🔥 카메라 포트 복구 실패! (수동 확인 필요)")
 
-                # 2. iRAS 설정 복구
-                print(f"   [2] iRAS 설정 원복 ({default_iras_port})...")
-                try:
-                    if iRAS_test.run_port_change_process(CFG["IRAS_DEV_NAME"], default_iras_port):
-                        print(f"   ✅ iRAS 설정 복구 완료")
-                    else:
-                        print("   ⚠️ iRAS 설정 복구 실패")
-                except Exception as e:
-                    print(f"   ⚠️ iRAS 복구 중 에러: {e}")
                         
         # [Step 12] 대역폭 제한 테스트
         if current_test_ip:
