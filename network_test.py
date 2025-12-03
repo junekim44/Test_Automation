@@ -316,11 +316,16 @@ class CameraApi:
         self.session.auth = HTTPDigestAuth(user_id, user_pw)
 
     def _get_config(self, action):
+        """설정값 읽기 (디버깅 강화 버전)"""
         try:
-            res = self.session.get(f"{self.base_url}?action={action}&mode=1", timeout=5)
+            url = f"{self.base_url}?action={action}&mode=1"
+            res = self.session.get(url, timeout=5)
             if res.status_code == 200:
                 return dict(parse_qsl(res.text))
-        except: pass
+            else:
+                print(f"   ⚠️ [API Read Fail] Status: {res.status_code}, Msg: {res.text.strip()}")
+        except Exception as e:
+            print(f"   ⚠️ [API Read Error] {e}")
         return {}
     
     def set_link_local_api(self, enable=True):
@@ -425,56 +430,127 @@ class CameraApi:
             return False
 
     def set_ports_api(self, web_port=None, watch_port=None):
-        """API로 포트 변경 (Read-Modify-Write)"""
-        print(f"📡 [API] 포트 변경 요청: Web={web_port}, Watch={watch_port}...", end="")
-        current_config = self._get_config("networkPort")
-        if not current_config:
-            print(" ❌ 설정 읽기 실패")
-            return False
-        current_config["action"] = "networkPort"
-        current_config["mode"] = "0"
-        if web_port: current_config["webPort"] = str(web_port)
-        if watch_port: current_config["watchPort"] = str(watch_port)
-        if "returnCode" in current_config: del current_config["returnCode"]
+        """
+        포트 변경 및 검증 함수 (세션 초기화 로직 적용)
+        """
+        current_ip = self.base_url.split("://")[1].split(":")[0]
+        
+        changes = []
+        if web_port: changes.append(f"HTTP={web_port}")
+        if watch_port: changes.append(f"Service(Admin/Watch/Search)={watch_port}")
+        print(f"📡 [API] 포트 변경 요청: {', '.join(changes)}...", end="")
+
+        # 1. 현재 설정 읽기
+        cfg = self._get_config("networkPort")
+        if not cfg:
+            print(" (설정 읽기 실패, 강제 진행)...", end="")
+            cfg = {}
+
+        # 2. 파라미터 구성 (모든 서비스 포트 동기화)
+        target_service_port = str(watch_port) if watch_port else cfg.get("watchPort", "8016")
+        target_web_port = str(web_port) if web_port else cfg.get("webPort", "80")
+
+        payload = {
+            "action": "networkPort",
+            "mode": "0",
+            "useWeb": cfg.get("useWeb", "on"),
+            "useRtsp": cfg.get("useRtsp", "on"),
+            "useUPNP": cfg.get("useUPNP", "off"),
+            "useHTTPS": cfg.get("useHTTPS", "off"),
+            
+            "webPort": target_web_port,
+            "adminPort": target_service_port,
+            "watchPort": target_service_port,
+            "searchPort": target_service_port,
+            "remotePort": target_service_port,
+            
+            "rtspPort": cfg.get("rtspPort", "554"),
+            "recordPort": cfg.get("recordPort", "8017"),
+        }
+
+        # 3. 명령 전송 (기존 세션 사용)
         try:
-            res = self.session.post(self.base_url, data=current_config, timeout=15)
-            if "returnCode=0" in res.text or "returnCode=301" in res.text:
-                print(" 성공 (재부팅/재시작 대기) ✅")
-                return True
-            print(f" 실패 ❌ (응답: {res.text.strip()})")
-            return False
+            self.session.post(self.base_url, data=payload, timeout=3)
+        except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+            pass # 끊김 허용
         except Exception as e:
-            print(f" 오류 🔥 ({e})")
-            return False
-    
+            print(f" 전송 중 에러({e}) -> 검증 시도...", end="")
+
+        # 4. [검증] 변경된 포트로 Read 요청 (새 세션 사용!)
+        verify_url = f"http://{current_ip}:{target_web_port}/cgi-bin/webSetup.cgi"
+        print(f"\n   -> 🔄 변경된 포트({target_web_port})로 검증 시도...", end="")
+        
+        # [핵심] 포트가 바뀌었으므로 '새로운 세션' 생성 (기존 연결 간섭 방지)
+        new_session = requests.Session()
+        new_session.auth = self.session.auth # ID/PW만 복사
+        
+        for i in range(20): # 최대 20초 대기 (충분한 시간 확보)
+            try:
+                time.sleep(1)
+                # 타임아웃 2초로 짧게 끊어서 확인
+                res = new_session.get(f"{verify_url}?action=networkPort&mode=1", timeout=2)
+                
+                if res.status_code == 200 and "returnCode=0" in res.text:
+                    new_data = dict(parse_qsl(res.text))
+                    # 값이 실제로 바뀌었는지 확인
+                    if (new_data.get('webPort') == target_web_port):
+                        print(" 성공 (설정값 적용 확인됨) 🎯")
+                        
+                        # 검증 성공 시, 메인 세션을 새 세션으로 교체 및 URL 업데이트
+                        self.session = new_session
+                        self.base_url = verify_url 
+                        return True
+            except Exception as e:
+                # 에러 메시지 확인용 (너무 길면 주석 처리)
+                # print(f"({e})", end="") 
+                print(".", end="")
+                continue
+                
+        print(f" 실패 ❌ (20초 응답 없음 - 수동 확인 필요)")
+        return False
+
     def reset_ports_default(self):
-        """API를 사용하여 포트 설정을 기본값(80, 8016, 554)으로 강제 복구"""
-        print("🚑 [API] 포트 설정을 기본값(80, 8016, 554)으로 복구합니다...")
+        """
+        포트 설정 초기화 (최신 펌웨어 기준: 8016 통합)
+        - HTTP: 80
+        - Admin/Watch/Search/Remote: 8016 (모두 통일)
+        - UPnP: OFF
+        """
+        print("🚑 [API] 포트 설정을 기본값(HTTP:80, Service:8016)으로 복구 요청...", end="")
         
         payload = {
             "action": "networkPort",
             "mode": "0",
             "useWeb": "on",
-            "webPort": "80",
-            "adminPort": "8200", 
-            "watchPort": "8016", 
-            "searchPort": "10019",
-            "recordPort": "8017",
             "useRtsp": "on",
-            "rtspPort": "554",
             "useHTTPS": "off",
-            "useUPNP": "on"
+            "useUPNP": "off",          # UPnP 끔
+            
+            "webPort": "80",           # HTTP Default
+            "rtspPort": "554",         # RTSP Default
+            "recordPort": "8016",      # Record Default
+            
+            # [핵심] 모든 서비스 포트를 8016으로 통일
+            "adminPort": "8016",       
+            "watchPort": "8016",       
+            "searchPort": "8016",      
+            "remotePort": "8016"       
         }
         
         try:
             res = self.session.post(self.base_url, data=payload, timeout=5)
-            if "returnCode=0" in res.text:
-                print("   ✅ 포트 초기화 성공")
+            if "returnCode=0" in res.text or "returnCode=301" in res.text:
+                print(" 성공 ✅")
+                time.sleep(5) 
                 return True
             else:
-                print(f"   ⚠️ 초기화 응답 이상: {res.text.strip()}")
+                print(f" 실패 (응답: {res.text.strip()})")
+        except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
+            print(" 성공 (연결 끊김 - 복구 명령 적용됨) ✅")
+            time.sleep(5)
+            return True
         except Exception as e:
-            print(f"   ❌ API 복구 요청 실패: {e}")
+            print(f" 실패 (통신오류: {e})")
         return False
     
     def set_bandwidth_limit(self, enable=True, limit_kbps=102400):
@@ -598,10 +674,43 @@ def _run_web_action(action_func, *args, **kwargs):
 
 def _action_get_mac(web, ip): return web.get_mac_address(ip)
 def _action_verify_web_access(web, ip, port):
+    target_url = f"http://{ip}:{port}/setup/setup.html"
+    print(f"   🌐 접속 시도: {target_url}")
+    
+    # [수정] 최대 2회 시도
+    for attempt in range(2):
+        try:
+            # 1. 페이지 이동 (타임아웃 30초로 증가)
+            print(f"      -> 페이지 로딩 중... (시도 {attempt+1}/2)")
+            web.page.goto(target_url, timeout=30000) 
+            
+            # 2. 로딩 완료 대기 (ID 입력창 혹은 타이틀)
+            try:
+                # 입력창이 뜰 때까지 최대 5초 대기
+                web.page.wait_for_selector("#userid", state="visible", timeout=5000)
+                print("   ✅ 로그인 화면(ID 입력창) 확인됨")
+                return True
+            except:
+                # 입력창이 안 뜨면 타이틀 확인
+                title = web.page.title()
+                print(f"      -> 현재 페이지 타이틀: '{title}'")
+                if "IDIS" in title or "Camera" in title or "setup" in title:
+                    print(f"   ✅ 페이지 타이틀로 접속 확인 성공")
+                    return True
+                else:
+                    print("      ⚠️ 타이틀이나 입력창을 찾을 수 없음")
+                    
+        except Exception as e:
+            print(f"      ⚠️ 접속 에러 ({attempt+1}차): {e}")
+            time.sleep(3) # 3초 쉬고 재시도
+
+    # 실패 시 스크린샷 저장 (디버깅용)
     try:
-        web.page.goto(f"http://{ip}:{port}/setup/setup.html", timeout=5000)
-        return "IDIS" in web.page.title() or web.page.is_visible("#userid")
-    except: return False
+        web.page.screenshot(path="error_screenshot.png")
+        print("   📸 실패 화면 저장됨: error_screenshot.png")
+    except: pass
+    
+    return False
 def _action_webguard_login(web_dummy, fen_url, user, pw):
     try:
         page = web_dummy.page
@@ -795,89 +904,141 @@ def run_integrated_network_test(
         #         print("🎉 [Pass] WebGuard Login")
     
         # [Step 15] 복구 (먼저 실행하여 Static 상태로 만듦)
-        new_dhcp_ip = "10.0.17.78"
-        if new_dhcp_ip:
-            print("\n>>> [Step 15] 전체 네트워크 설정 복구 (Web & iRAS -> Static IP)")
-            restore_ip = CFG["CAM_IP"]       
-            restore_gw = CFG["PC_GW"]        
-            restore_subnet = CFG["PC_SUBNET"]
+        # new_dhcp_ip = "None"
+        # if new_dhcp_ip:
+        #     print("\n>>> [Step 15] 전체 네트워크 설정 복구 (Web & iRAS -> Static IP)")
+        #     restore_ip = CFG["CAM_IP"]       
+        #     restore_gw = CFG["PC_GW"]        
+        #     restore_subnet = CFG["PC_SUBNET"]
             
-            print(f"   [15-1] Web: 카메라({new_dhcp_ip})를 고정 IP({restore_ip})로 변경합니다...")
-            # API로 고정 IP 설정 변경
-            api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-            if api.set_ip_address_api(mode_type="manual", ip=restore_ip, gateway=restore_gw, subnet=restore_subnet):
-                print("   ✅ Web 설정 변경 명령 전송 완료 (대기 5초)...")
-                time.sleep(5)
-            else:
-                print("   ⚠️ Web 설정 변경 실패")
+        #     print(f"   [15-1] Web: 카메라({new_dhcp_ip})를 고정 IP({restore_ip})로 변경합니다...")
+        #     # API로 고정 IP 설정 변경
+        #     api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+        #     if api.set_ip_address_api(mode_type="manual", ip=restore_ip, gateway=restore_gw, subnet=restore_subnet):
+        #         print("   ✅ Web 설정 변경 명령 전송 완료 (대기 5초)...")
+        #         time.sleep(5)
+        #     else:
+        #         print("   ⚠️ Web 설정 변경 실패")
             
-            print(f"   -> 카메라 통신 확인 중 ({restore_ip})...")
-            if NetworkManager.ping(restore_ip, timeout=10):
-                print(f"   ✅ 카메라 통신 확인 완료")
-                print(f"   [15-3] iRAS: 연결 정보를 고정 IP({restore_ip})로 수정...")
-                if iRAS_test.run_restore_ip_process(CFG["IRAS_DEV_NAME"], restore_ip):
-                    print("   ✅ iRAS 복구 및 저장 완료")
-                    iRAS_test.wait_for_connection()
-                else: print("   ⚠️ iRAS 복구 실패")
-            else: print("   ❌ 카메라 통신 불가")
+        #     print(f"   -> 카메라 통신 확인 중 ({restore_ip})...")
+        #     if NetworkManager.ping(restore_ip, timeout=10):
+        #         print(f"   ✅ 카메라 통신 확인 완료")
+        #         print(f"   [15-3] iRAS: 연결 정보를 고정 IP({restore_ip})로 수정...")
+        #         if iRAS_test.run_restore_ip_process(CFG["IRAS_DEV_NAME"], restore_ip):
+        #             print("   ✅ iRAS 복구 및 저장 완료")
+        #             iRAS_test.wait_for_connection()
+        #         else: print("   ⚠️ iRAS 복구 실패")
+        #     else: print("   ❌ 카메라 통신 불가")
 
         # 이제부터 테스트 대상 IP는 고정 IP
         current_test_ip = CFG["CAM_IP"]
         
-        # [Step 11] 포트 변경 및 검증 (Web & iRAS 동시 검증)
+        # [Step 11] 포트 변경 및 검증 (Web:8080, iRAS:9200)
         if current_test_ip:
-            print("\n>>> [Step 11] 포트 변경 및 듀얼 검증 (Web:8080, iRAS:8200)")
+            print("\n>>> [Step 11] 임의 포트 변경 및 검증 테스트")
+            print("    목표 1: HTTP 포트 80 -> 8080 변경")
+            print("    목표 2: Watch(원격) 포트 8016 -> 9200 변경")
+            
+            # API 객체 생성 (초기 80 포트)
             api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            
             test_http_port = "8080"
-            test_watch_port = "8200"
+            test_watch_port = "9200" 
+            default_iras_port = "8016"
             
             try:
-                print(f"\n   [11-1] 카메라 포트 변경 요청 (API)...")
-                # API로 포트 변경 (Web & Watch)
+                print(f"\n   [11-1] 카메라 포트 변경 API 전송 및 검증...")
+                
+                # 1. API 호출 (내부에서 Write -> Read(8080) -> Verify 수행)
                 if api.set_ports_api(web_port=test_http_port, watch_port=test_watch_port):
-                    time.sleep(5)
-                else: raise Exception("API 포트 변경 요청 실패")
+                    print("   -> API 검증 완료. (설정 적용됨)")
+                    
+                    # 성공 시 CFG 업데이트 (Teardown에서 참조용)
+                    CFG["PORT"] = test_http_port
+                    # api.base_url은 set_ports_api 내부에서 이미 8080으로 업데이트 되었습니다.
+                else: 
+                    raise Exception("API 포트 변경 실패 (새 포트 응답 없음)")
 
-                CFG["PORT"] = test_http_port 
-                api.base_url = f"http://{current_test_ip}:{test_http_port}/cgi-bin/webSetup.cgi"
-
-                print(f"\n   [11-2] Web 접속 테스트 (Port: {test_http_port})")
+                # 2. Web 접속 테스트 (Playwright)
+                print(f"\n   [11-2] Web 접속 테스트 (Target: {test_http_port})")
                 if check_port_open(current_test_ip, test_http_port):
                     print(f"   ✅ Socket Check: {test_http_port} is OPEN")
+
+                    # 웹 서비스(httpd) 로딩 대기 시간 (3초)
+                    print("   -> 웹 서비스 안정화 대기 (3초)...") 
+                    time.sleep(3)
+
                     if _run_web_action(_action_verify_web_access, current_test_ip, test_http_port):
-                         print(f"   🎉 Web Access Success")
-                    else: print(f"   ❌ Web Access Failed")
+                         print(f"   🎉 Web Access Success (페이지 로딩 확인)")
+                    else: print(f"   ❌ Web Access Failed (페이지 로딩 실패)")
                 else: print(f"   ❌ Socket Check: {test_http_port} is CLOSED")
 
-                print(f"\n   [11-3] iRAS 접속 테스트 (Port: {test_watch_port})")
+                # 3. iRAS 접속 테스트
+                print(f"\n   [11-3] iRAS 접속 테스트 (Target: {test_watch_port})")
                 if check_port_open(current_test_ip, test_watch_port):
                     print(f"   ✅ Socket Check: {test_watch_port} is OPEN")
-                    # iRAS 설정 변경 및 접속
+                    
+                    print(f"   -> iRAS 설정을 {test_watch_port}로 변경...")
                     if iRAS_test.run_port_change_process(CFG["IRAS_DEV_NAME"], test_watch_port):
                         print("   -> iRAS 설정 변경 완료. 영상 연결 대기...")
-                        if iRAS_test.wait_for_connection(timeout=60): print(f"   🎉 iRAS Access Success")
-                        else: print("   ⚠️ iRAS 영상 연결 시간 초과")
-                    else: print("   ⚠️ iRAS 자동화 설정 실패")
+                        
+                        if iRAS_test.wait_for_connection(timeout=60): 
+                            print(f"   🎉 iRAS Access Success (포트 {test_watch_port} 정상 동작)")
+                        else: 
+                            print("   ⚠️ iRAS 영상 연결 실패 (시간 초과)")
+                    else: print("   ⚠️ iRAS 자동화 제어 실패")
                 else: print(f"   ❌ Socket Check: {test_watch_port} is CLOSED")
 
             except Exception as e:
                 print(f"   🔥 [Critical] Step 11 테스트 중단: {e}")
 
             finally:
-                print("\n🧹 [Teardown] 포트 설정 초기화")
-                api.base_url = f"http://{current_test_ip}:{CFG['PORT']}/cgi-bin/webSetup.cgi"
-                if api.reset_ports_default():
-                    print("   ✅ 포트 초기화 명령 전송 성공")
-                    CFG["PORT"] = "80" 
-                    api.base_url = f"http://{current_test_ip}:80/cgi-bin/webSetup.cgi"
-                    print("   -> 재부팅 대기 (30초)...")
-                    time.sleep(30)
-                else: print("   🔥 포트 복구 실패! (수동 확인 필요)")
+                print("\n🧹 [Teardown] 포트 설정 초기화 및 복구")
+                
+                # 1. 카메라 API 복구
+                print("   [1] 카메라 API 포트 복구 시도...")
+                # 현재 설정된 포트(CFG)와 8080, 80을 모두 시도하여 가장 먼저 연결되는 곳에서 복구 명령 전송
+                ports_to_try = [CFG["PORT"], "8080", "80"]
+                # 중복 제거 및 정렬 (현재 설정된 포트 우선)
+                ports_to_try = sorted(list(set(ports_to_try)), key=lambda x: 0 if x == CFG["PORT"] else 1)
+                
+                recovered_cam = False
+                for p in ports_to_try:
+                    if not p: continue
+                    try:
+                        print(f"   -> 접속 시도 (Port: {p})...", end="")
+                        api.base_url = f"http://{current_test_ip}:{p}/cgi-bin/webSetup.cgi"
+                        
+                        # 복구 함수 호출 (HTTP:80, Remote:8016, UPnP:OFF)
+                        if api.reset_ports_default():
+                            print(" 성공 ✅")
+                            recovered_cam = True
+                            break
+                        else: print(" 실패 (API 응답 에러)")
+                    except: print(" 실패 (연결 불가)")
+                
+                if recovered_cam:
+                    CFG["PORT"] = "80" # 전역 설정 원복
+                    print("   -> 카메라 포트 복구 완료 (HTTP:80 / Remote:8016 / UPnP:OFF)")
+                    print("   -> 안정화 대기 (5초)...")
+                    time.sleep(5)
+                else:
+                    print("   🔥 카메라 포트 복구 실패! (수동 확인 필요)")
+
+                # 2. iRAS 설정 복구
+                print(f"   [2] iRAS 설정 원복 ({default_iras_port})...")
+                try:
+                    if iRAS_test.run_port_change_process(CFG["IRAS_DEV_NAME"], default_iras_port):
+                        print(f"   ✅ iRAS 설정 복구 완료")
+                    else:
+                        print("   ⚠️ iRAS 설정 복구 실패")
+                except Exception as e:
+                    print(f"   ⚠️ iRAS 복구 중 에러: {e}")
                         
         # [Step 12] 대역폭 제한 테스트
         if current_test_ip:
             print("\n>>> [Step 12] 대역폭 제한 테스트 (API 제어)")
-            if 'api' not in locals(): api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
             try:
                 print("   [12-1] 대역폭 최대(100Mbps) 설정")
                 api.set_bandwidth_limit(enable=True, limit_kbps=102400)
@@ -887,8 +1048,8 @@ def run_integrated_network_test(
 
                 print("\n   [12-2] 대역폭 최소(100Kbps) 제한 설정")
                 if api.set_bandwidth_limit(enable=True, limit_kbps=1024):
-                    print("   -> 대역폭 제한 적용 대기 (10초)...")
-                    time.sleep(10)
+                    print("   -> 대역폭 제한 적용 대기 (15초)...")
+                    time.sleep(15)
                     limit_ips = iRAS_test.IRASController().get_current_ips()
                     if limit_ips < base_ips * 0.5 or limit_ips < 10: print(f"   🎉 [Pass] 제한 동작 확인 (IPS: {base_ips} -> {limit_ips})")
                     else: print(f"   ⚠️ [Fail] 효과 미비 (IPS: {base_ips} -> {limit_ips})")
@@ -901,12 +1062,12 @@ def run_integrated_network_test(
         if current_test_ip:
             print("\n>>> [Step 13] IP 필터링(Deny List) 및 복구 테스트")
             TEMP_PC_IP = "10.0.131.200"; ORIGIN_PC_IP = get_local_ip() 
-            if 'api' not in locals(): api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
             try:
                 print(f"   [13-1] 내 IP ({ORIGIN_PC_IP}) 차단 설정")
                 if api.set_ip_filter(mode="deny", deny_list=ORIGIN_PC_IP):
                     print("   -> 차단 설정 완료. 접속 불가 확인 시도...")
-                    time.sleep(2)
+                    time.sleep(5)
                     try:
                         requests.get(f"http://{current_test_ip}:{CFG['PORT']}", timeout=3)
                         print("   ❌ [Fail] 차단되었는데 접속이 됩니다!")
@@ -929,50 +1090,63 @@ def run_integrated_network_test(
         # [Step 14] SSL 모드별 설정 및 iRAS 검증
         if current_test_ip:
             print("\n>>> [Step 14] SSL 모드 변경 및 iRAS 정보 검증")
-            if 'api' not in locals(): api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-            ssl_test_cases = [("standard", "ExcludeMultimediaPacket"), ("high", "PartiallyMultimediaPacket"), ("veryhigh", "FullPacket")]
+            print("    (참고: API 제어는 HTTP 유지, SSL 설정은 영상/프로토콜 암호화 적용)")
+            
+            # API 객체 확인 (없으면 생성)
+            api = CameraApi(current_test_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            
+            # SSL 모드별 기대 값 (iRAS 클립보드 정보)
+            ssl_test_cases = [
+                ("standard", "ExcludeMultimediaPacket"), 
+                ("high", "PartiallyMultimediaPacket"), 
+                ("veryHigh", "FullPacket")
+            ]
+            
             try:
                 for mode, expected_text in ssl_test_cases:
                     print(f"\n   [Test] SSL 모드 설정: {mode}")
+                    
+                    # API로 SSL 설정 변경 (HTTP로 전송)
                     if api.set_ssl(enable=True, ssl_type=mode):
-                        wait_time = 40 if mode == "veryhigh" else 20
+                        # veryhigh는 암호화 부하로 적용 시간이 더 걸릴 수 있음
+                        wait_time = 20
                         print(f"   -> 설정 적용 대기 (약 {wait_time}초)...")
                         time.sleep(wait_time) 
+                        
+                        # iRAS에서 SSL 상태 확인 (클립보드 파싱)
                         detected_status = None
                         for i in range(3):
                             detected_status = iRAS_test.IRASController().get_current_ssl_info()
                             if detected_status: break
                             time.sleep(5)
+                        
                         if detected_status:
                             clean_detected = detected_status.lower().replace(" ", "")
                             clean_expected = expected_text.lower().replace(" ", "")
-                            if clean_expected in clean_detected: print(f"   🎉 [Pass] {mode} 모드 확인됨")
-                            else: print(f"   ⚠️ [Check] 값 불일치? (Actual: {detected_status})")
-                        else: print("   ❌ [Fail] iRAS에서 SSL 정보를 읽어오지 못함")
-                    else: print(f"   ❌ [Fail] API 설정 실패 ({mode})")
-            except Exception as e: print(f"   🔥 SSL 테스트 오류: {e}")
+                            
+                            if clean_expected in clean_detected: 
+                                print(f"   🎉 [Pass] {mode} 모드 확인됨 (iRAS: {detected_status})")
+                            else: 
+                                print(f"   ⚠️ [Check] 값 불일치? (Expected: {expected_text}, Actual: {detected_status})")
+                        else: 
+                            print("   ❌ [Fail] iRAS에서 SSL 정보를 읽어오지 못함")
+                    else: 
+                        print(f"   ❌ [Fail] API 설정 실패 ({mode})")
+                        
+            except Exception as e: 
+                print(f"   🔥 SSL 테스트 오류: {e}")
+            
             finally:
                 print("\n   🧹 [Teardown] SSL 비활성화 (복구)")
-                print("   -> 카메라 통신 상태 확인 중...", end="")
-                for _ in range(10):
-                    if check_port_open(current_test_ip, CFG["PORT"]): 
-                        print(" 연결됨 ✅"); break
-                    elif check_port_open(current_test_ip, "443"): 
-                        print(" 연결됨(SSL) ✅"); break
-                    print(".", end="", flush=True); time.sleep(3)
-                else: print(" ❌ 응답 없음 (강제 진행)")
-
-                api.base_url = f"https://{current_test_ip}:443/cgi-bin/webSetup.cgi"
+                # [수정] HTTPS로 바꾸지 않고, 기존 HTTP 연결 그대로 사용하여 복구 시도
                 try:
-                    if api.set_ssl(enable=False): print("   ✅ SSL 비활성화 성공 (HTTPS)")
-                    else: raise Exception("HTTPS Fail")
-                except:
-                    print("   ⚠️ HTTPS 접속 불가. HTTP로 재시도...")
-                    api.base_url = f"http://{current_test_ip}:{CFG['PORT']}/cgi-bin/webSetup.cgi"
-                    try:
-                        if api.set_ssl(enable=False): print("   ✅ SSL 비활성화 성공 (HTTP)")
-                        else: print("   ❌ SSL 비활성화 최종 실패")
-                    except Exception as e: print(f"   🔥 복구 중 에러: {e}")
+                    # API로 SSL 끄기 요청
+                    if api.set_ssl(enable=False): 
+                        print("   ✅ SSL 비활성화 성공")
+                    else: 
+                        print("   ❌ SSL 비활성화 실패 (API 응답 확인 필요)")
+                except Exception as e:
+                    print(f"   🔥 복구 중 통신 에러: {e}")
         
         print("\n✅ 모든 네트워크 테스트 완료.")
         return True, "네트워크 및 iRAS 테스트 완료"

@@ -591,7 +591,6 @@ class IRASController:
         self._click(setup_hwnd, ID_OK_BTN)
         return True
     
-    # [수정] 원격 포트 변경 (네트워크 탭 이동 + 리스트 더블클릭 강화)
     def set_remote_port(self, device_search_key, port_value):
         print(f"\n🔌 [iRAS] 원격 포트 설정 변경 시작 (Target: {port_value})")
         
@@ -610,64 +609,61 @@ class IRASController:
         modify_hwnd = self._get_handle(TITLE_MODIFY)
         if not modify_hwnd: return False
 
-        # 🌟 [핵심] '네트워크' 탭 클릭 (탭을 안 누르면 포트 리스트가 안 보임)
-        print("   [iRAS] '네트워크' 탭으로 이동 시도...")
+        # 2. '네트워크' 탭 클릭 (안정성을 위해 유지)
         try:
             win = auto.ControlFromHandle(modify_hwnd)
             tab_control = win.TabControl()
             if tab_control.Exists(maxSearchSeconds=2):
-                # 이름으로 찾기 시도
                 network_tab = tab_control.TabItemControl(Name="네트워크")
                 if network_tab.Exists(maxSearchSeconds=1):
-                    network_tab.Click()
+                    network_tab.Click() # UIA 네이티브 클릭 사용
                 else:
-                    # 이름 못 찾으면 좌표로 클릭 (두 번째 탭 위치)
+                    # 탭을 못 찾으면 좌표 클릭 (좌표 보정 포함)
                     rect = tab_control.BoundingRectangle
-                    win32api.SetCursorPos((int(rect.left + 100), int(rect.top + 15)))
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                time.sleep(1.5) # 탭 전환 대기
+                    cx = int(rect.left + 100)
+                    cy = int(rect.top + 15)
+                    # win32api 대신 uiautomation의 Click 사용 권장 (다중 모니터 호환)
+                    auto.Click(cx, cy)
+                time.sleep(1.5)
         except: pass
 
-        # 🌟 [핵심] 리스트에서 '원격 포트' 찾아 값 변경
+        # 🌟 [수정 핵심] 마우스 클릭 없이 '값 직접 주입' (ValuePattern)
+        print(f"   [iRAS] 포트 입력창(ID: 1201) 값 변경 시도...")
+        
         try:
             win = auto.ControlFromHandle(modify_hwnd)
-            # 리스트 아이템 찾기
-            port_item = win.ListItemControl(Name="원격 포트")
+            # Inspector에서 확인된 ID 1201 사용
+            port_edit = win.EditControl(AutomationId="1201")
             
-            # 혹시 이름이 다를 경우 대비 (정규식)
-            if not port_item.Exists(maxSearchSeconds=1):
-                 port_item = win.ListItemControl(RegexName=".*원격.*")
+            if port_edit.Exists(maxSearchSeconds=3):
+                # 방법 1: ValuePattern을 이용해 값 직접 설정 (클릭 X)
+                # Inspector에 IsValuePatternAvailable: true 라고 되어 있으므로 가능합니다.
+                try:
+                    print(f"   -> [Method 1] ValuePattern으로 값 설정: {port_value}")
+                    port_edit.GetValuePattern().SetValue(str(port_value))
+                except Exception as e:
+                    print(f"   ⚠️ ValuePattern 실패({e}), LegacyPattern 시도...")
+                    # 방법 2: LegacyPattern (백업)
+                    port_edit.GetLegacyIAccessiblePattern().SetValue(str(port_value))
 
-            if port_item.Exists(maxSearchSeconds=2):
-                print(f"   -> '원격 포트' 항목 발견. {port_value} 입력 시도...")
-                
-                # 아이템 중앙 좌표 계산
-                rect = port_item.BoundingRectangle
-                cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
-                
-                # 더블 클릭 (입력창 활성화)
-                win32api.SetCursorPos((cx, cy)); time.sleep(0.2)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                time.sleep(0.1)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                time.sleep(1.0) # 입력창 뜰 때까지 대기
-
-                # 값 입력
-                self.shell.SendKeys(str(port_value))
                 time.sleep(0.5)
-                self.shell.SendKeys("{ENTER}") # 입력 확정
+                
+                # [중요] 값이 들어간 후, 엔터를 쳐서 앱이 인식하게 함
+                # 포커스를 확실히 주기 위해 UIA 네이티브 클릭 한번 수행
+                port_edit.Click() 
+                time.sleep(0.2)
+                self.shell.SendKeys("{ENTER}")
                 time.sleep(1.0)
+                print("   -> 값 입력 및 엔터 완료")
+                
             else:
-                print("❌ '원격 포트' 리스트 항목을 찾을 수 없습니다. (탭 이동 실패?)")
+                print("❌ 포트 입력창(ID: 1201)을 찾을 수 없습니다. (탭 이동 실패?)")
                 self._click(modify_hwnd, ID_OK_BTN)
                 self._click(setup_hwnd, ID_OK_BTN)
                 return False
 
         except Exception as e:
-            print(f"⚠️ 포트 변경 UI 에러: {e}")
+            print(f"⚠️ 포트 변경 중 에러 발생: {e}")
             return False
 
         # 저장 및 닫기
