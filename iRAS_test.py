@@ -50,7 +50,7 @@ class IRASController:
         self.shell = win32com.client.Dispatch("WScript.Shell")
 
     # --- [내부 유틸] ---
-    def _get_handle(self, title, force_focus=False):
+    def _get_handle(self, title, force_focus=False, use_alt=True):
         """창 핸들 찾기 및 강력한 포커스 전환"""
         hwnd = win32gui.FindWindow(None, title)
         
@@ -69,9 +69,24 @@ class IRASController:
                 
                 if force_focus:
                     # [중요] 윈도우 포커스 락 해제를 위한 Alt 키 트릭
-                    self.shell.SendKeys('%')
+                    if use_alt:
+                        self.shell.SendKeys('%')
                     win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(0.2)
                     # UIA를 통한 2차 포커스 시도
+                    if not use_alt:
+                        rect = win32gui.GetWindowRect(hwnd)
+                        # 창의 상단(타이틀바 근처) 안전한 곳 클릭
+                        safe_x = rect[0] + 100
+                        safe_y = rect[1] + 10
+                        
+                        current_pos = win32api.GetCursorPos()
+                        win32api.SetCursorPos((safe_x, safe_y))
+                        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                        win32api.SetCursorPos(current_pos) # 마우스 원위치
+                        time.sleep(0.2)
+                        
                     try: auto.ControlFromHandle(hwnd).SetFocus()
                     except: pass
             except: pass
