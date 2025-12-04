@@ -1,0 +1,210 @@
+import time
+from playwright.sync_api import Page
+from common_actions import parse_api_response
+
+# 💡 iRAS 컨트롤러 및 타이틀 상수 가져오기
+from iRAS_test import IRASController, TITLE_MAIN
+
+# ===========================================================
+# ⚙️ [설정] 테스트 상수
+# ===========================================================
+WAIT_TIME = 10  # iRAS 영상 변화 관찰 대기 시간
+
+PRESET_MODES = {
+    "1": "Natural (자연스러운)",
+    "2": "Vivid (선명한)",
+    "3": "Denoise (노이즈 감소)"
+}
+
+PARAM_RANGES = {
+    "Sharpness": ["0", "1", "2", "3"],
+    "Contrast": ["0", "1", "2"],
+    "Brightness": ["0", "1", "2"],
+    "Colors": ["0", "1", "2"]
+}
+
+# ===========================================================
+# 📸 [Snapshot] 스크린샷 캡처 함수
+# ===========================================================
+def trigger_iras_snapshot():
+    """
+    iRAS 창을 찾아 포커스한 뒤 Ctrl+S를 전송하여 스냅샷을 저장합니다.
+    저장 경로: C:\\IDIS-Center\\Client\\save\\still\\admin
+    """
+    try:
+        ctrl = IRASController()
+        # iRAS 창 핸들을 찾고 포커스 (키 입력을 받기 위해 필수)
+        if ctrl._get_handle(TITLE_MAIN, force_focus=True):
+            time.sleep(0.5) # 포커스 전환 안정화 대기
+            ctrl.save_snapshot()
+            print("   📸 [Snapshot] 스크린샷 저장 (Ctrl+S)")
+            time.sleep(1) # 저장 완료 대기
+        else:
+            print("   ⚠️ iRAS 창을 찾을 수 없어 스크린샷을 건너뜁니다.")
+    except Exception as e:
+        print(f"   ⚠️ 스크린샷 시도 중 오류: {e}")
+
+
+# ===========================================================
+# ⚙️ [API] 제어 함수
+# ===========================================================
+
+def api_get_video_easy_setting(page: Page, ip: str):
+    """[Read] 현재 설정 조회"""
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoEasySetting&mode=1"
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+
+        if response_text and not response_text.startswith("Error"):
+            return parse_api_response(response_text)
+        return None
+    except: return None
+
+def api_set_video_easy_setting(page: Page, ip: str, params: dict):
+    """[Write] 설정 변경"""
+    query_str = "&".join([f"{k}={v}" for k, v in params.items()])
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoEasySetting&mode=0&{query_str}"
+    
+    print(f"   📡 [API Write] {params}")
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url, { method: 'POST' });
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+
+        return "returnCode=0" in response_text
+    except: return False
+
+# ===========================================================
+# 🧪 [Main Module] Self Adjust Mode 테스트 시나리오
+# ===========================================================
+
+def run_self_adjust_mode_test(page: Page, camera_ip: str):
+    print("\n=======================================================")
+    print(f"🎬 [Video] Self Adjust Mode (Easy Video Setting) Test")
+    print("=======================================================")
+
+    # 1. iRAS 화면 포커싱 (이미 실행 중인 iRAS를 맨 앞으로 가져옴)
+    try:
+        print("   🖥️ iRAS 화면 포커싱 시도...")
+        iras = IRASController()
+        # _get_handle을 사용하여 창을 찾고 포커스 (iRAS_test.py 로직 활용)
+        if iras._get_handle(TITLE_MAIN, force_focus=True):
+            print("   ✅ iRAS 포커스 성공")
+        else:
+            print("   ⚠️ iRAS 창을 찾을 수 없습니다. (실행 여부 확인 필요)")
+    except Exception as e:
+        print(f"   ⚠️ iRAS 제어 중 오류 (무시하고 진행): {e}")
+
+    print("\n=======================================================")
+    print(f"🎬 [Video] Self Adjust Mode (Easy Video Setting) Test")
+    print(f"ℹ️  설정 변경 -> {WAIT_TIME}초 대기 -> 스크린샷(Ctrl+S) -> 검증")
+    print("=======================================================")
+
+    # 시작 전 iRAS 포커싱 한 번 수행
+    trigger_iras_snapshot() 
+    
+    failed_count = 0
+
+    # [Scenario 1] 프리셋 모드 순차 변경
+    print("\n[Step 1] 프리셋 모드(Preset) 전체 순회 테스트")
+    for val, name in PRESET_MODES.items():
+        print(f"\n   👉 설정 변경: {name} (Value: {val})")
+        target_params = {"easyDayType": val, "easyNightType": val}
+        
+        if api_set_video_easy_setting(page, camera_ip, target_params):
+            print(f"   ⏳ 영상 확인 대기 ({WAIT_TIME}초)...")
+            time.sleep(WAIT_TIME)
+            
+            # 📸 스크린샷 촬영
+            trigger_iras_snapshot()
+            
+            curr_data = api_get_video_easy_setting(page, camera_ip)
+            if curr_data and curr_data.get("easyDayType") == val:
+                print(f"   ✅ 검증 성공: {name}")
+            else:
+                print(f"   ❌ 검증 실패: {name}")
+                failed_count += 1
+        else:
+            print("   ❌ API 전송 실패")
+            failed_count += 1
+
+    # [Scenario 2] Custom 모드 및 세부 파라미터 테스트
+    print("\n[Step 2] Custom 모드 세부 파라미터 전체 순회 테스트")
+    print("   👉 모드 변경: Custom (사용자 설정)")
+
+    custom_enter_params = {
+        "easyDayType": "0",         
+        "easyDaySharpness": "1",
+        "easyDayContrast": "1",
+        "easyDayBrightness": "1",
+        "easyDayColors": "1",
+        "easyNightType": "0",       
+        "easyNightSharpness": "1",
+        "easyNightGamma": "1",
+        "easyNightBrightness": "1"
+    }
+
+    if api_set_video_easy_setting(page, camera_ip, custom_enter_params):
+        time.sleep(2)
+        trigger_iras_snapshot()
+    else:
+        return False, "Custom 진입 실패 (API 오류)"
+
+    test_targets = [
+        ("Sharpness", "easyDaySharpness"),
+        ("Contrast", "easyDayContrast"),
+        ("Brightness", "easyDayBrightness"),
+        ("Colors", "easyDayColors")
+    ]
+
+    for param_name, api_key in test_targets:
+        print(f"\n   --- [Test Target: {param_name}] ---")
+        for val in PARAM_RANGES[param_name]:
+            print(f"   👉 {param_name} 변경: {val}")
+
+            payload = {
+                "easyDayType": "0",     # Custom 모드임을 명시
+                "easyNightType": "0",   # Night도 같이
+                api_key: val            # 변경할 값
+            }
+            
+            if api_set_video_easy_setting(page, camera_ip, {api_key: val}):
+                print(f"   ⏳ 영상 확인 대기 ({WAIT_TIME}초)...")
+                time.sleep(WAIT_TIME)
+                
+                # 📸 스크린샷 촬영
+                trigger_iras_snapshot()
+
+                curr = api_get_video_easy_setting(page, camera_ip, payload)
+                if curr.get(api_key) == val:
+                    print(f"   ✅ {param_name}={val} 적용 확인")
+                else:
+                    print(f"   ❌ 실패: 기대({val}) != 실제({curr.get(api_key)})")
+                    failed_count += 1
+            else:
+                print("   ❌ API 전송 실패")
+                failed_count += 1
+
+    # [Scenario 3] 복구
+    print("\n[Step 3] 설정 초기화 (Natural 모드로 복구)")
+    if api_set_video_easy_setting(page, camera_ip, {"easyDayType": "1", "easyNightType": "1"}):
+        time.sleep(2)
+        trigger_iras_snapshot() # 복구 후 스샷
+        print("   ✅ 설정 복구 완료")
+    else:
+        print("   ⚠️ 설정 복구 실패")
+
+    if failed_count == 0:
+        return True, "테스트 성공"
+    else:
+        return False, f"실패 항목 {failed_count}건"

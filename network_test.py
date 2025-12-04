@@ -763,171 +763,171 @@ def run_integrated_network_test(
     target_mac = None
 
     try:
-        # # [Step 1] PC IP 고정 및 MAC 주소 획득
-        # print("\n>>> [Step 1] Link-Local 활성화 준비")
-        # NetworkManager.set_static_ip(CFG["PC_STATIC_IP"], CFG["PC_SUBNET"], CFG["PC_GW"])
+        # [Step 1] PC IP 고정 및 MAC 주소 획득
+        print("\n>>> [Step 1] Link-Local 활성화 준비")
+        NetworkManager.set_static_ip(CFG["PC_STATIC_IP"], CFG["PC_SUBNET"], CFG["PC_GW"])
         
-        # if NetworkManager.ping(target_ip):
-        #     target_mac = _run_web_action(_action_get_mac, target_ip) # MAC은 Web에서 가져옴
-        #     if target_mac:
-        #         # API로 Link Local 설정
-        #         api = CameraApi(target_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-        #         api.set_link_local_api(enable=True)
-        # else:
-        #     return False, "초기 카메라 접속 실패"
+        if NetworkManager.ping(target_ip):
+            target_mac = _run_web_action(_action_get_mac, target_ip) # MAC은 Web에서 가져옴
+            if target_mac:
+                # API로 Link Local 설정
+                api = CameraApi(target_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+                api.set_link_local_api(enable=True)
+        else:
+            return False, "초기 카메라 접속 실패"
 
-        # if not target_mac:
-        #     return False, "MAC 주소 확보 실패"
+        if not target_mac:
+            return False, "MAC 주소 확보 실패"
 
-        # # [Step 2] Auto-IP 검증 및 DHCP 전환
-        # print("\n>>> [Step 2] 169.254 Auto-IP 검증 및 DHCP 설정")
-        # NetworkManager.set_static_ip(CFG["PC_AUTO_IP"], CFG["AUTO_SUBNET"])
-        # NetworkManager.run_cmd("arp -d *")
+        # [Step 2] Auto-IP 검증 및 DHCP 전환
+        print("\n>>> [Step 2] 169.254 Auto-IP 검증 및 DHCP 설정")
+        NetworkManager.set_static_ip(CFG["PC_AUTO_IP"], CFG["AUTO_SUBNET"])
+        NetworkManager.run_cmd("arp -d *")
         
-        # auto_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_AUTO_NET"], timeout=40)
+        auto_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_AUTO_NET"], timeout=40)
         
-        # if auto_ip and "169.254" in auto_ip:
-        #     print(f"🎉 Auto-IP 접속 성공: {auto_ip}")
+        if auto_ip and "169.254" in auto_ip:
+            print(f"🎉 Auto-IP 접속 성공: {auto_ip}")
             
-        #     api_auto = CameraApi(auto_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            api_auto = CameraApi(auto_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
             
-        #     # 🌟 [수정] Link-Local 해제와 DHCP 설정을 '한 번에' 보냄
-        #     print("   -> [통합 명령] Link-Local 해제 + DHCP 전환 요청...")
-        #     if api_auto.set_ip_address_api(mode_type="dhcp", link_local_off=True):
-        #         print("   ✅ DHCP & Link-Local OFF 설정 완료")
-        #     else:
-        #         print("   ⚠️ 설정 실패 (재부팅 후 확인 필요)")
-        # else:
-        #     print("⚠️ Auto-IP 탐색 실패 (이미 DHCP일 수 있음)")
+            # 🌟 [수정] Link-Local 해제와 DHCP 설정을 '한 번에' 보냄
+            print("   -> [통합 명령] Link-Local 해제 + DHCP 전환 요청...")
+            if api_auto.set_ip_address_api(mode_type="dhcp", link_local_off=True):
+                print("   ✅ DHCP & Link-Local OFF 설정 완료")
+            else:
+                print("   ⚠️ 설정 실패 (재부팅 후 확인 필요)")
+        else:
+            print("⚠️ Auto-IP 탐색 실패 (이미 DHCP일 수 있음)")
 
-        # # [Step 4] 복구 및 FEN (API)
-        # NetworkManager.set_dhcp()
+        # [Step 4] 복구 및 FEN (API)
+        NetworkManager.set_dhcp()
         
-        # if NetworkManager.wait_for_dhcp("10."):
-        #     print("   -> ARP 캐시 초기화...")
-        #     NetworkManager.run_cmd("arp -d *") # 🌟 중요: 윈도우가 기억하는 옛날 IP 삭제
-        #     time.sleep(2)
+        if NetworkManager.wait_for_dhcp("10."):
+            print("   -> ARP 캐시 초기화...")
+            NetworkManager.run_cmd("arp -d *") # 🌟 중요: 윈도우가 기억하는 옛날 IP 삭제
+            time.sleep(2)
             
-        #     print(f"   -> DHCP 할당된 새 IP 탐색 (MAC: {target_mac})...")
+            print(f"   -> DHCP 할당된 새 IP 탐색 (MAC: {target_mac})...")
             
-        #     # 🌟 스캔 시도 (최대 60초)
-        #     # find_ip_combined가 '10.0.131.104'를 또 찾을 수도 있으니, 
-        #     # 만약 찾은 IP가 고정 IP(CFG["CAM_IP"])와 같다면, 
-        #     # "이거 말고 다른거 찾아!"라고 재시도 로직을 넣거나 
-        #     # 사용자가 DHCP 서버에서 할당받았을 법한 IP인지 확인해야 합니다.
+            # 🌟 스캔 시도 (최대 60초)
+            # find_ip_combined가 '10.0.131.104'를 또 찾을 수도 있으니, 
+            # 만약 찾은 IP가 고정 IP(CFG["CAM_IP"])와 같다면, 
+            # "이거 말고 다른거 찾아!"라고 재시도 로직을 넣거나 
+            # 사용자가 DHCP 서버에서 할당받았을 법한 IP인지 확인해야 합니다.
             
-        #     new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=60)
+            new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=60)
             
-        #     # (선택) 만약 여전히 10.0.131.104라면, 정말로 DHCP가 안 먹힌 것임.
-        #     if new_dhcp_ip == CFG["CAM_IP"]:
-        #         print(f"   ⚠️ 경고: 카메라가 여전히 초기 IP({new_dhcp_ip})입니다. DHCP 실패 가능성 있음.")
+            # (선택) 만약 여전히 10.0.131.104라면, 정말로 DHCP가 안 먹힌 것임.
+            if new_dhcp_ip == CFG["CAM_IP"]:
+                print(f"   ⚠️ 경고: 카메라가 여전히 초기 IP({new_dhcp_ip})입니다. DHCP 실패 가능성 있음.")
             
-        #     if new_dhcp_ip and NetworkManager.ping(new_dhcp_ip):
-        #         print(f"🎉 카메라 재접속 성공: {new_dhcp_ip}")
+            if new_dhcp_ip and NetworkManager.ping(new_dhcp_ip):
+                print(f"🎉 카메라 재접속 성공: {new_dhcp_ip}")
                 
-        #         api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-        #         # API로 FEN 설정
-        #         api.set_fen_api(CFG["FEN_NAME"], CFG["FEN_SVR"])
-        #         api.verify_fen_setting(CFG["FEN_SVR"])
+                api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+                # API로 FEN 설정
+                api.set_fen_api(CFG["FEN_NAME"], CFG["FEN_SVR"])
+                api.verify_fen_setting(CFG["FEN_SVR"])
 
-        #         # [Step 5] iRAS
-        #         print("\n>>> [Step 5] iRAS 연동 테스트 (DirectExternal)")
-        #         if iRAS_test.run_fen_setup_process(CFG["IRAS_DEV_NAME"], CFG["FEN_NAME"]):
-        #             iRAS_test.wait_for_connection()
-        #             _refresh_session(api)
-        #             if iRAS_test.run_fen_verification("TcpDirectExternal"):
-        #                 print("🎉 [Pass] TcpDirectExternal 확인")
-        #             else:
-        #                 print("   ⚠️ 1차 검증 실패, 재시도...")
-        #                 if iRAS_test.run_fen_verification("TcpDirectExternal"):
-        #                     print("🎉 [Pass] TcpDirectExternal 확인 (재시도 성공)")
+                # [Step 5] iRAS
+                print("\n>>> [Step 5] iRAS 연동 테스트 (DirectExternal)")
+                if iRAS_test.run_fen_setup_process(CFG["IRAS_DEV_NAME"], CFG["FEN_NAME"]):
+                    iRAS_test.wait_for_connection()
+                    _refresh_session(api)
+                    if iRAS_test.run_fen_verification("TcpDirectExternal"):
+                        print("🎉 [Pass] TcpDirectExternal 확인")
+                    else:
+                        print("   ⚠️ 1차 검증 실패, 재시도...")
+                        if iRAS_test.run_fen_verification("TcpDirectExternal"):
+                            print("🎉 [Pass] TcpDirectExternal 확인 (재시도 성공)")
 
-        # # [Step 7] UPNP (DirectInternal)
-        # router_cam_ip = None 
-        # if new_dhcp_ip:
-        #     print("\n>>> [Step 7] UPNP 활성화 및 DirectInternal 검증")
-        #     print("   ℹ️  UPNP 확인을 위해 공유기 환경으로 이동합니다.")
-        #     input("🚨 [ACTION] 카메라와 PC를 모두 '공유기'에 연결하고 Enter >> ")
+        # [Step 7] UPNP (DirectInternal)
+        router_cam_ip = None 
+        if new_dhcp_ip:
+            print("\n>>> [Step 7] UPNP 활성화 및 DirectInternal 검증")
+            print("   ℹ️  UPNP 확인을 위해 공유기 환경으로 이동합니다.")
+            input("🚨 [ACTION] 카메라와 PC를 모두 '공유기'에 연결하고 Enter >> ")
             
-        #     NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("192.")
-        #     print("   -> 공유기 환경에서 카메라 IP 재탐색...")
-        #     router_cam_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=40)
-        #     if not router_cam_ip: router_cam_ip = auto_ip 
+            NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("192.")
+            print("   -> 공유기 환경에서 카메라 IP 재탐색...")
+            router_cam_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=40)
+            if not router_cam_ip: router_cam_ip = auto_ip 
             
-        #     if router_cam_ip:
-        #         print(f"   ✅ 타겟 IP 확보: {router_cam_ip}")
-        #         api = CameraApi(router_cam_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-        #         # API로 UPNP ON
-        #         if not api.set_upnp_api(enable=True):
-        #             print("   ⚠️ API 설정 실패")
+            if router_cam_ip:
+                print(f"   ✅ 타겟 IP 확보: {router_cam_ip}")
+                api = CameraApi(router_cam_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+                # API로 UPNP ON
+                if not api.set_upnp_api(enable=True):
+                    print("   ⚠️ API 설정 실패")
                 
-        #         iRAS_test.wait_for_connection()
-        #         if iRAS_test.run_fen_verification("TcpDirectInternal"): print("🎉 [Pass] TcpDirectInternal 확인")
-        #         else: print("⚠️ [Fail] TcpDirectInternal 실패")
-        #     else:
-        #         print("❌ 공유기 환경에서 카메라를 찾을 수 없어 Step 7~8 중단")
+                iRAS_test.wait_for_connection()
+                if iRAS_test.run_fen_verification("TcpDirectInternal"): print("🎉 [Pass] TcpDirectInternal 확인")
+                else: print("⚠️ [Fail] TcpDirectInternal 실패")
+            else:
+                print("❌ 공유기 환경에서 카메라를 찾을 수 없어 Step 7~8 중단")
 
-        # # [Step 8] UDP Hole Punching
-        # if router_cam_ip:
-        #     print("\n>>> [Step 8] UDP Hole Punching")
-        #     print("   -> [설정] 카메라 UPNP 비활성화(OFF)...")
-        #     # API로 UPNP OFF
-        #     api.set_upnp_api(enable=False)
-        #     time.sleep(5)
-        #     _refresh_session(api)
+        # [Step 8] UDP Hole Punching
+        if router_cam_ip:
+            print("\n>>> [Step 8] UDP Hole Punching")
+            print("   -> [설정] 카메라 UPNP 비활성화(OFF)...")
+            # API로 UPNP OFF
+            api.set_upnp_api(enable=False)
+            time.sleep(5)
+            _refresh_session(api)
 
-        #     print("\n⚠️ [Move] 공유기 upnp 해제 후 PC만 사내망으로 이동합니다.")
-        #     input("🚨 [ACTION] PC 랜선을 '사내망'으로 옮기고 Enter >> ")
-        #     NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("10.")
-        #     iRAS_test.wait_for_connection()
+            print("\n⚠️ [Move] 공유기 upnp 해제 후 PC만 사내망으로 이동합니다.")
+            input("🚨 [ACTION] PC 랜선을 '사내망'으로 옮기고 Enter >> ")
+            NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("10.")
+            iRAS_test.wait_for_connection()
             
-        #     if iRAS_test.run_fen_verification("UdpHolePunching"): print("🎉 [Pass] UdpHolePunching 확인")
-        #     else: print("⚠️ [Fail] UDP Hole Punching 실패")
+            if iRAS_test.run_fen_verification("UdpHolePunching"): print("🎉 [Pass] UdpHolePunching 확인")
+            else: print("⚠️ [Fail] UDP Hole Punching 실패")
 
-        # # [Step 9] FEN Relay
-        # if router_cam_ip:
-        #     print("\n>>> [Step 9] FEN Relay (UDP Block)")
-        #     input("🚨 [ACTION] 공유기 설정에서 'UDP 차단' 후 회사 망 복귀 Enter >> ")
-        #     iRAS_test.wait_for_connection()
-        #     if iRAS_test.run_fen_verification("Relay"): print("🎉 [Pass] FEN Relay 확인")
-        #     else: print("⚠️ [Fail] FEN Relay 실패")
+        # [Step 9] FEN Relay
+        if router_cam_ip:
+            print("\n>>> [Step 9] FEN Relay (UDP Block)")
+            input("🚨 [ACTION] 공유기 설정에서 'UDP 차단' 후 회사 망 복귀 Enter >> ")
+            iRAS_test.wait_for_connection()
+            if iRAS_test.run_fen_verification("Relay"): print("🎉 [Pass] FEN Relay 확인")
+            else: print("⚠️ [Fail] FEN Relay 실패")
 
-        #     print("\n🧹 [Restore] 카메라 사내망 복귀...")
-        #     input("🚨 [ACTION] '카메라'를 사내망(허브)으로 연결 후 Enter >> ")
-        #     new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=10)
+            print("\n🧹 [Restore] 카메라 사내망 복귀...")
+            input("🚨 [ACTION] '카메라'를 사내망(허브)으로 연결 후 Enter >> ")
+            new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=10)
 
-        # # [Step 10] WebGuard
-        # if new_dhcp_ip:
-        #     print("\n>>> [Step 10] WebGuard Login")
-        #     fen_url = f"http://{CFG['FEN_SVR']}/{CFG['FEN_NAME']}"
-        #     if _run_web_action(_action_webguard_login, fen_url, CFG["ID"], CFG["PW"]):
-        #         print("🎉 [Pass] WebGuard Login")
+        # [Step 10] WebGuard
+        if new_dhcp_ip:
+            print("\n>>> [Step 10] WebGuard Login")
+            fen_url = f"http://{CFG['FEN_SVR']}/{CFG['FEN_NAME']}"
+            if _run_web_action(_action_webguard_login, fen_url, CFG["ID"], CFG["PW"]):
+                print("🎉 [Pass] WebGuard Login")
     
-        # # [Step 15] 복구 (먼저 실행하여 Static 상태로 만듦)
-        # if new_dhcp_ip:
-        #     print("\n>>> [Step 15] 전체 네트워크 설정 복구 (Web & iRAS -> Static IP)")
-        #     restore_ip = CFG["CAM_IP"]       
-        #     restore_gw = CFG["PC_GW"]        
-        #     restore_subnet = CFG["PC_SUBNET"]
+        # [Step 15] 복구 (먼저 실행하여 Static 상태로 만듦)
+        if new_dhcp_ip:
+            print("\n>>> [Step 15] 전체 네트워크 설정 복구 (Web & iRAS -> Static IP)")
+            restore_ip = CFG["CAM_IP"]       
+            restore_gw = CFG["PC_GW"]        
+            restore_subnet = CFG["PC_SUBNET"]
             
-        #     print(f"   [15-1] Web: 카메라({new_dhcp_ip})를 고정 IP({restore_ip})로 변경합니다...")
-        #     # API로 고정 IP 설정 변경
-        #     api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
-        #     if api.set_ip_address_api(mode_type="manual", ip=restore_ip, gateway=restore_gw, subnet=restore_subnet):
-        #         print("   ✅ Web 설정 변경 명령 전송 완료 (대기 5초)...")
-        #         time.sleep(5)
-        #     else:
-        #         print("   ⚠️ Web 설정 변경 실패")
+            print(f"   [15-1] Web: 카메라({new_dhcp_ip})를 고정 IP({restore_ip})로 변경합니다...")
+            # API로 고정 IP 설정 변경
+            api = CameraApi(new_dhcp_ip, CFG["PORT"], CFG["ID"], CFG["PW"])
+            if api.set_ip_address_api(mode_type="manual", ip=restore_ip, gateway=restore_gw, subnet=restore_subnet):
+                print("   ✅ Web 설정 변경 명령 전송 완료 (대기 5초)...")
+                time.sleep(5)
+            else:
+                print("   ⚠️ Web 설정 변경 실패")
             
-        #     print(f"   -> 카메라 통신 확인 중 ({restore_ip})...")
-        #     if NetworkManager.ping(restore_ip, timeout=10):
-        #         print(f"   ✅ 카메라 통신 확인 완료")
-        #         print(f"   [15-3] iRAS: 연결 정보를 고정 IP({restore_ip})로 수정...")
-        #         if iRAS_test.run_restore_ip_process(CFG["IRAS_DEV_NAME"], restore_ip):
-        #             print("   ✅ iRAS 복구 및 저장 완료")
-        #             iRAS_test.wait_for_connection()
-        #         else: print("   ⚠️ iRAS 복구 실패")
-        #     else: print("   ❌ 카메라 통신 불가")
+            print(f"   -> 카메라 통신 확인 중 ({restore_ip})...")
+            if NetworkManager.ping(restore_ip, timeout=10):
+                print(f"   ✅ 카메라 통신 확인 완료")
+                print(f"   [15-3] iRAS: 연결 정보를 고정 IP({restore_ip})로 수정...")
+                if iRAS_test.run_restore_ip_process(CFG["IRAS_DEV_NAME"], restore_ip):
+                    print("   ✅ iRAS 복구 및 저장 완료")
+                    iRAS_test.wait_for_connection()
+                else: print("   ⚠️ iRAS 복구 실패")
+            else: print("   ❌ 카메라 통신 불가")
 
         # 이제부터 테스트 대상 IP는 고정 IP
         current_test_ip = CFG["CAM_IP"]

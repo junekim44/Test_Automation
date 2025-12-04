@@ -76,6 +76,33 @@ class IRASController:
                     except: pass
             except: pass
         return hwnd
+    
+    def save_snapshot(self):
+        """
+        iRAS 스냅샷 저장을 위한 Ctrl+S 키 입력 (win32api 사용으로 신뢰성 향상)
+        """
+        print("   📸 [Input] Ctrl+S 키 입력 시도...")
+        try:
+            # 1. Ctrl Key Down (0x11)
+            win32api.keybd_event(0x11, 0, 0, 0)
+            time.sleep(0.1)
+            
+            # 2. 'S' Key Down (0x53)
+            win32api.keybd_event(0x53, 0, 0, 0)
+            time.sleep(0.1)
+            
+            # 3. 'S' Key Up
+            win32api.keybd_event(0x53, 0, win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(0.1)
+            
+            # 4. Ctrl Key Up
+            win32api.keybd_event(0x11, 0, win32con.KEYEVENTF_KEYUP, 0)
+            
+            print("   -> 키 입력 완료")
+            return True
+        except Exception as e:
+            print(f"   ⚠️ 키 입력 실패: {e}")
+            return False
 
     def _click(self, hwnd, auto_id, right_click=False, y_offset=None):
         """UIA 요소 클릭"""
