@@ -19,6 +19,8 @@ TITLE_MODIFY = "장치 수정"
 # UI 요소 ID (AutomationId)
 ID_DEV_SEARCH_INPUT = "101"     # 설정창 > 장치 검색
 ID_DEV_LIST = "1000"            # 설정창 > 장치 리스트
+ID_USER_ID_INPUT = "22043"      # 수정창 > 사용자 ID
+ID_USER_PW_INPUT = "22045"      # 수정창 > 사용자 PW
 ID_ADDR_TYPE_COMBO = "1195"     # 수정창 > 주소 타입 콤보박스
 ID_FEN_INPUT = "22047"          # 수정창 > FEN 이름 입력
 ID_PORT_INPUT = "1201"          # 수정창 > 원격 포트 입력
@@ -86,7 +88,7 @@ class IRASController:
                         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
                         win32api.SetCursorPos(current_pos) # 마우스 원위치
                         time.sleep(0.2)
-                        
+
                     try: auto.ControlFromHandle(hwnd).SetFocus()
                     except: pass
             except: pass
@@ -120,20 +122,32 @@ class IRASController:
             return False
 
     def _click(self, hwnd, auto_id, right_click=False, y_offset=None):
-        """UIA 요소 클릭"""
+        """UIA 요소 클릭 (y_offset 지원)"""
         try:
             win = auto.ControlFromHandle(hwnd)
             elem = win.Control(AutomationId=auto_id)
             if not elem.Exists(maxSearchSeconds=3): return False
             
             rect = elem.BoundingRectangle
-            cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
-            if y_offset: cy = int(rect.top + y_offset)
+            cx = int((rect.left + rect.right) / 2)
+            # y_offset이 있으면 Top 기준, 없으면 Center 기준
+            cy = int(rect.top + y_offset) if y_offset is not None else int((rect.top + rect.bottom) / 2)
 
             win32api.SetCursorPos((cx, cy)); time.sleep(0.3)
-            flags = (win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP) if right_click else (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP)
-            win32api.mouse_event(flags[0], 0, 0, 0, 0); time.sleep(0.1)
-            win32api.mouse_event(flags[1], 0, 0, 0, 0)
+            
+            if right_click:
+                # 우클릭 전 좌클릭으로 포커스 확보
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(0.2)
+                win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            else:
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             return True
         except: return False
 
@@ -152,25 +166,6 @@ class IRASController:
             except: pass
         return False
     
-    def _double_click(self, hwnd, auto_id):
-        """UIA 요소 더블 클릭 [추가됨]"""
-        try:
-            win = auto.ControlFromHandle(hwnd)
-            elem = win.Control(AutomationId=auto_id)
-            if not elem.Exists(maxSearchSeconds=3): return False
-            
-            rect = elem.BoundingRectangle
-            cx, cy = int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)
-            
-            win32api.SetCursorPos((cx, cy)); time.sleep(0.2)
-            # 더블 클릭 수행
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(0.05) # 더블 클릭 간격
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            return True
-        except: return False
 
     def _click_relative(self, dx, dy):
         """상대 좌표 클릭"""
@@ -178,6 +173,10 @@ class IRASController:
         win32api.SetCursorPos((cx + dx, cy + dy)); time.sleep(0.3)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); time.sleep(0.1)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    
+    def _right_click_surveillance(self, main_hwnd):
+        """감시 화면 상단부(Top+100) 우클릭"""
+        return self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True, y_offset=100)
 
     def _enter_setup(self):
         """메인화면 -> 시스템(S) -> 설정(i) 진입"""
@@ -206,6 +205,32 @@ class IRASController:
             tab = win.TabItemControl() # 첫 번째 탭(감시) 가정
             if tab.Exists(maxSearchSeconds=1): tab.Click()
         except: pass
+    
+    def _click_network_tab(self, hwnd):
+        """장치 수정 창에서 '네트워크' 탭 클릭"""
+        try:
+            win = auto.ControlFromHandle(hwnd)
+            tab_control = win.TabControl()
+            if tab_control.Exists(maxSearchSeconds=2):
+                # 1. 이름으로 찾기
+                network_tab = tab_control.TabItemControl(Name="네트워크")
+                if network_tab.Exists(maxSearchSeconds=1):
+                    network_tab.Click()
+                    return True
+                
+                # 2. 오프셋으로 찾기 (두 번째 탭 가정)
+                rect = tab_control.BoundingRectangle
+                # 탭 헤더 높이 등을 고려해 적절히 오프셋 설정
+                # 보통 첫 번째 탭 너비만큼 오른쪽으로 이동
+                click_x = rect.left + 100 
+                click_y = rect.top + 15
+                
+                win32api.SetCursorPos((int(click_x), int(click_y)))
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                return True
+        except: return False
+        return False
     
     def wait_for_video_attachment(self, timeout=180):
         """
@@ -254,33 +279,41 @@ class IRASController:
             if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
                 self._click_relative(*COORD_MENU_FW_UP)
                 time.sleep(2.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
-            self._click(setup_hwnd, ID_OK_BTN) # 설정 닫기
+            
+            # 설정창 닫기 (확인 버튼)
+            self._click(setup_hwnd, ID_OK_BTN)
+            time.sleep(2.0)
 
-        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
+        main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True) # 메인 포커스
         if not main_hwnd: return False
 
-        # 2. 감시 화면 관련 차단 확인 (PTZ, Color, Alarm)
-        ops = [COORD_MENU_PTZ, COORD_MENU_COLOR]
-        for op in ops:
-            if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
-                self._click_relative(*op)
-                time.sleep(1.5); self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+        # 2. 감시 화면 관련 (PTZ)
+        if self._right_click_surveillance(main_hwnd):
+            self._click_relative(*COORD_MENU_PTZ)
+            time.sleep(2.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
 
-        # 3. 알람 출력
-        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
-            self._click_relative(*COORD_MENU_ALARM); time.sleep(0.3)
+        # 3. 컬러 제어
+        if self._right_click_surveillance(main_hwnd):
+            self._click_relative(*COORD_MENU_COLOR)
+            time.sleep(2.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
+
+        # 4. 알람 출력
+        if self._right_click_surveillance(main_hwnd):
+            self._click_relative(*COORD_MENU_ALARM); time.sleep(0.5)
             self._click_relative(*COORD_ALARM_ON)
-            time.sleep(1.5); self.shell.SendKeys("{ENTER}"); time.sleep(0.5)
+            time.sleep(2.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
 
-        # 4. 클립 카피 (재생 -> 저장 -> 클립복사)
-        if self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+        # 5. 클립 카피 (재생 -> 저장 -> 클립복사)
+        if self._right_click_surveillance(main_hwnd):
             self._click_relative(*COORD_MENU_PLAYBACK)
-            time.sleep(4.0)
+            time.sleep(5.0) # 재생창 로딩 대기
+            
+            # 저장 버튼 클릭
             if self._click(main_hwnd, ID_SAVE_CLIP_BTN):
                 time.sleep(1.0)
-                self._click_relative(*COORD_CLIP_COPY) # 저장 메뉴 내 상대 좌표
-                time.sleep(2.0); self.shell.SendKeys("{ENTER}")
-            self._return_to_watch() # 감시 복귀
+                self._click_relative(*COORD_CLIP_COPY)
+                time.sleep(3.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
+                self._return_to_watch()
             
         print("   ✅ Phase 1 완료")
         return True
@@ -291,22 +324,26 @@ class IRASController:
     def run_permission_phase2(self, device_name):
         print("\n🧪 [iRAS] Phase 2: 설정/검색 차단 테스트...")
         
-        # 1. 원격 설정 차단 확인
+        # 1. 원격 설정
         setup_hwnd = self._enter_setup()
         if setup_hwnd:
             self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_name)
             if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
                 self._click_relative(*COORD_MENU_REMOTE)
-                print("   [Wait] 팝업 대기 (5초)...")
-                time.sleep(5.0) # 차단 팝업 대기
-                self.shell.SendKeys("{ENTER}") # 팝업 닫기
-            self._click(setup_hwnd, ID_OK_BTN) # 설정 닫기
+                print("   [Wait] 차단 팝업 대기 (8초)...")
+                time.sleep(8.0) 
+                # 차단 메시지가 뜨면 닫아야 함 (Enter 등) - 상황에 따라 다를 수 있음
+                # 보통 차단되면 아무 창도 안뜨거나 경고창이 뜸. 일단 Enter 전송.
+                # self.shell.SendKeys("{ENTER}") 
+            
+            # 설정창 닫기
+            self._click(setup_hwnd, ID_OK_BTN); time.sleep(2.0)
 
-        # 2. 녹화 영상 검색(재생) 차단 확인
+        # 2. 검색(재생)
         main_hwnd = self._get_handle(TITLE_MAIN, force_focus=True)
-        if main_hwnd and self._click(main_hwnd, ID_SURVEILLANCE_PANE, right_click=True):
+        if main_hwnd and self._right_click_surveillance(main_hwnd):
             self._click_relative(*COORD_MENU_PLAYBACK)
-            time.sleep(2.0); self.shell.SendKeys("{ENTER}")
+            time.sleep(3.0); self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
             self._return_to_watch()
 
         print("   ✅ Phase 2 완료")
@@ -633,6 +670,56 @@ class IRASController:
         self._click(setup_hwnd, ID_OK_BTN)
         return True
     
+    def update_device_credentials(self, device_name, user_id, user_pw):
+        setup_hwnd = self._enter_setup()
+        if not setup_hwnd: return False
+
+        # 1. 장치 검색
+        time.sleep(1.0)
+        self._input(setup_hwnd, ID_DEV_SEARCH_INPUT, device_name)
+        time.sleep(1.0)
+        
+        # 2. 리스트 우클릭 -> 장치 수정
+        if self._click(setup_hwnd, ID_DEV_LIST, right_click=True, y_offset=25):
+            self._click_relative(*COORD_MENU_MODIFY)
+            time.sleep(2.0)
+        else:
+            self._click(setup_hwnd, ID_OK_BTN)
+            return False
+
+        modify_hwnd = self._get_handle(TITLE_MODIFY)
+        if not modify_hwnd: return False
+        
+        try:
+            # 3. 네트워크 탭 이동 (요청사항 반영)
+            print("   [iRAS] 네트워크 탭으로 이동...")
+            self._click_network_tab(modify_hwnd)
+            time.sleep(0.5)
+
+            # 4. ID/PW 입력 (요청하신 ID 22043, 22045 사용)
+            print(f"   [iRAS] 계정 정보 업데이트 ({user_id})...")
+            self._input(modify_hwnd, ID_USER_ID_INPUT, user_id)
+            time.sleep(0.5)
+            self._input(modify_hwnd, ID_USER_PW_INPUT, user_pw)
+            time.sleep(0.5)
+            
+            # 5. 연결 테스트
+            print("   [iRAS] 연결 테스트 실행...")
+            if self._click(modify_hwnd, ID_TEST_BTN):
+                time.sleep(3.0) 
+                self.shell.SendKeys("{ENTER}"); time.sleep(1.0)
+            
+        except Exception as e:
+            print(f"   ⚠️ 계정 변경 중 오류: {e}")
+            self._click(modify_hwnd, ID_OK_BTN)
+            self._click(setup_hwnd, ID_OK_BTN)
+            return False
+
+        # 저장
+        self._click(modify_hwnd, ID_OK_BTN); time.sleep(2.0)
+        self._click(setup_hwnd, ID_OK_BTN)
+        return True
+    
 
 def run_fen_setup_process(device_name_to_search, fen_name):
     """
@@ -846,6 +933,43 @@ def run_restore_ip_process(device_name, ip_address):
     else:
         print("🔥 [iRAS] IP 모드 복구 실패")
         return False
+
+def run_iras_permission_check(device_name_to_search, user_id, user_pw, phase=1):
+    """
+    [복원된 함수] 사용자 권한 확인 통합 테스트
+    :param phase: 1 (기능 차단), 2 (설정/검색 차단)
+    """
+    print(f"\n🖥️ [iRAS] 테스트 시작 (Phase: {phase})...")
+    
+    controller = IRASController()
+    
+    # [Step 1] 계정 변경 (Phase 1일 때만 수행하거나, 매번 수행)
+    # 로그인 시퀀스를 포함하여 접속 정보를 갱신합니다.
+    print(f"   [iRAS] 로그인 시퀀스 및 계정 변경 ({user_id})...")
+    if not controller.update_device_credentials(device_name_to_search, user_id, user_pw):
+        return False, "계정 변경 및 로그인 실패"
+    
+    print("   ⏳ 설정 적용 대기 (5초)...")
+    time.sleep(5)
+
+    # [Step 2] Phase별 검증
+    result = False
+    if phase == 1:
+        result = controller.run_permission_phase1(device_name_to_search)
+    elif phase == 2:
+        result = controller.run_permission_phase2(device_name_to_search)
+    else:
+        return False, "Invalid Phase"
+        
+    if result:
+        return True, f"Phase {phase} 테스트 성공"
+    else:
+        return False, f"Phase {phase} 테스트 실패"
+
+def restore_admin_login(device_name, admin_id, admin_pw):
+    controller = IRASController()
+    print(f"\n🔄 [iRAS] 관리자 계정 복구: {admin_id} ...")
+    return controller.update_device_credentials(device_name, admin_id, admin_pw)
 
 if __name__ == "__main__":
     

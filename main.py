@@ -17,7 +17,7 @@ try:
     from language_test import run_all_languages_test # 필요시 주석 해제
     from datetime_test import run_datetime_tests
     from user_group_tests import run_user_group_test
-    from video_test import run_self_adjust_mode_test, run_video_image_test, run_white_balance_test
+    from video_test import run_self_adjust_mode_test, run_video_image_test, run_white_balance_test, run_exposure_test
 except ImportError as e:
     print(f"오류: 파일이나 함수를 찾을 수 없습니다. {e}")
     exit()
@@ -85,38 +85,38 @@ def main():
             # if not success: raise Exception(msg)
             # print(f"🎉 [성공] {msg}")
 
-            # # --- [사용자/그룹 테스트] ---
-            # success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)
-            # if not success: raise Exception(msg)
-            # print(f"🎉 [최종 성공] {msg}")
+            # --- [사용자/그룹 테스트] ---
+            success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)
+            if not success: raise Exception(msg)
+            print(f"🎉 [최종 성공] {msg}")
 
-            # print("\n📡 네트워크 통합 테스트를 별도 프로세스로 시작합니다...")
-            # print("   (브라우저 세션 충돌 방지를 위해 독립적으로 실행됩니다)\n")
+            print("\n📡 네트워크 통합 테스트를 별도 프로세스로 시작합니다...")
+            print("   (브라우저 세션 충돌 방지를 위해 독립적으로 실행됩니다)\n")
             
-            # # 현재 실행 중인 파이썬 인터프리터 경로
-            # python_exe = sys.executable 
+            # 현재 실행 중인 파이썬 인터프리터 경로
+            python_exe = sys.executable 
             
-            # # subprocess로 실행할 명령어 구성
-            # cmd = [
-            #     python_exe, "network_test.py",
-            #     "--ip", CAMERA_IP,
-            #     "--id", USERNAME,
-            #     "--pw", PASSWORD,
-            #     "--iface", INTERFACE_NAME
-            # ]
+            # subprocess로 실행할 명령어 구성
+            cmd = [
+                python_exe, "network_test.py",
+                "--ip", CAMERA_IP,
+                "--id", USERNAME,
+                "--pw", PASSWORD,
+                "--iface", INTERFACE_NAME
+            ]
             
-            # # 실행 (check=True는 실패 시 예외 발생시킴)
-            # # 💡 브라우저는 닫을 필요 없음 (서로 다른 프로세스라 영향 없음)
-            # try:
-            #     subprocess.run(cmd, check=True)
-            #     print("\n🎉 [최종 성공] 네트워크 테스트 프로세스가 정상 종료되었습니다.")
-            # except subprocess.CalledProcessError:
-            #     raise Exception("네트워크 테스트 프로세스가 실패 코드를 반환했습니다.")
+            # 실행 (check=True는 실패 시 예외 발생시킴)
+            # 💡 브라우저는 닫을 필요 없음 (서로 다른 프로세스라 영향 없음)
+            try:
+                subprocess.run(cmd, check=True)
+                print("\n🎉 [최종 성공] 네트워크 테스트 프로세스가 정상 종료되었습니다.")
+            except subprocess.CalledProcessError:
+                raise Exception("네트워크 테스트 프로세스가 실패 코드를 반환했습니다.")
             
-            # # [Video] Self Adjust Mode (Easy Video Setting) 테스트
-            # success, msg = run_self_adjust_mode_test(page, CAMERA_IP)
-            # if not success: raise Exception(msg)
-            # print(f"🎉 [성공] {msg}")
+            # [Video] Self Adjust Mode (Easy Video Setting) 테스트
+            success, msg = run_self_adjust_mode_test(page, CAMERA_IP)
+            if not success: raise Exception(msg)
+            print(f"🎉 [성공] {msg}")
 
             # --- [Test 2] Video - Image (Mirroring/Pivot) ---
             print("\n🎥 [Video] Image Setting (Mirroring/Pivot) 테스트 시작...")
@@ -127,6 +127,11 @@ def main():
             # --- [Test 3] White Balance ---
             print("\n🎥 [Video] White Balance 테스트 시작...")
             success, msg = run_white_balance_test(page, CAMERA_IP)
+            if not success: raise Exception(msg)
+            print(f"🎉 [성공] {msg}")
+
+            print("\n🎥 [Video] Exposure 테스트 시작...")
+            success, msg = run_exposure_test(page, CAMERA_IP)
             if not success: raise Exception(msg)
             print(f"🎉 [성공] {msg}")
 

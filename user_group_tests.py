@@ -326,7 +326,7 @@ def run_user_group_test(page: Page, camera_ip: str, admin_id: str, admin_pw: str
     GROUP_B = "아이디스_B"
     UID = "testuser1"
     UPW = "qwerty0-"
-    DEVICE = "104_T6831"
+    DEVICE = "104_T6631"
 
     print("\n=== [통합 테스트] 그룹/사용자 관리 및 API 검증 Start ===")
     
