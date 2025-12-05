@@ -943,14 +943,17 @@ def run_iras_permission_check(device_name_to_search, user_id, user_pw, phase=1):
     
     controller = IRASController()
     
-    # [Step 1] 계정 변경 (Phase 1일 때만 수행하거나, 매번 수행)
-    # 로그인 시퀀스를 포함하여 접속 정보를 갱신합니다.
-    print(f"   [iRAS] 로그인 시퀀스 및 계정 변경 ({user_id})...")
-    if not controller.update_device_credentials(device_name_to_search, user_id, user_pw):
-        return False, "계정 변경 및 로그인 실패"
-    
-    print("   ⏳ 설정 적용 대기 (5초)...")
-    time.sleep(5)
+    # [Step 1] 계정 변경 (Phase 1일 때만 수행)
+    # Phase 2는 Phase 1에서 이미 로그인된 상태라고 가정하고 스킵합니다.
+    if phase == 1:
+        print(f"   [iRAS] 로그인 시퀀스 및 계정 변경 ({user_id})...")
+        if not controller.update_device_credentials(device_name_to_search, user_id, user_pw):
+            return False, "계정 변경 및 로그인 실패"
+        
+        print("   ⏳ 설정 적용 대기 (5초)...")
+        time.sleep(5)
+    else:
+        print(f"   ℹ️ [iRAS] 계정 변경 스킵 (Phase {phase} - 기존 로그인 유지)")
 
     # [Step 2] Phase별 검증
     result = False
