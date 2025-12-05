@@ -820,7 +820,40 @@ def run_integrated_network_test(
             
             # (선택) 만약 여전히 10.0.131.104라면, 정말로 DHCP가 안 먹힌 것임.
             if new_dhcp_ip == CFG["CAM_IP"]:
-                print(f"   ⚠️ 경고: 카메라가 여전히 초기 IP({new_dhcp_ip})입니다. DHCP 실패 가능성 있음.")
+                print(f"   -> DHCP 할당된 새 IP 탐색 (MAC: {target_mac})...")
+            
+            # [수정] 반복 탐색 로직 추가: 'ARP Cache'가 옛날 IP를 반환하면 무시하고 재탐색
+            start_scan = time.time()
+            new_dhcp_ip = None
+            
+            while time.time() - start_scan < 60:  # 60초 동안 유효한 IP 찾기 시도
+                temp_ip = CameraScanner.find_ip_combined(target_mac, CFG["SCAN_NET"], timeout=5)
+                
+                if temp_ip:
+                    # [1] 찾은 IP가 기존 고정 IP(Static)와 같은지 확인
+                    if temp_ip == CFG["CAM_IP"]:
+                        print(f"   ⚠️ [Check] 기존 IP({temp_ip})가 감지됨. 실제 연결 가능한지 Ping 테스트...")
+                        if NetworkManager.ping(temp_ip, timeout=2):
+                            print("   -> 기존 IP로 연결됨 (DHCP 할당 실패 또는 동일 IP 할당).")
+                            new_dhcp_ip = temp_ip
+                            break
+                        else:
+                            print("   -> Ping 실패! (Stale ARP Cache). 무시하고 계속 검색합니다...")
+                            NetworkManager.run_cmd("arp -d *")
+                            time.sleep(2)
+                            continue
+
+                    # [2] 169.254.x.x (Link-Local) 무시 로직 추가 [핵심!]
+                    elif temp_ip.startswith("169.254"):
+                        print(f"   ⚠️ [Skip] Auto-IP({temp_ip}) 감지됨. DHCP IP(10.x 등)를 기다립니다...")
+                        time.sleep(1)
+                        continue
+
+                    # [3] 그 외의 새로운 IP 발견 (DHCP 성공으로 간주)
+                    else:
+                        print(f"   ✅ 새로운 IP 발견: {temp_ip}")
+                        new_dhcp_ip = temp_ip
+                        break
             
             if new_dhcp_ip and NetworkManager.ping(new_dhcp_ip):
                 print(f"🎉 카메라 재접속 성공: {new_dhcp_ip}")

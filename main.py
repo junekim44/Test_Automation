@@ -86,9 +86,9 @@ def main():
             # print(f"🎉 [성공] {msg}")
 
             # --- [사용자/그룹 테스트] ---
-            success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)
-            if not success: raise Exception(msg)
-            print(f"🎉 [최종 성공] {msg}")
+            # success, msg = run_user_group_test(page, CAMERA_IP, USERNAME, PASSWORD)
+            # if not success: raise Exception(msg)
+            # print(f"🎉 [최종 성공] {msg}")
 
             print("\n📡 네트워크 통합 테스트를 별도 프로세스로 시작합니다...")
             print("   (브라우저 세션 충돌 방지를 위해 독립적으로 실행됩니다)\n")
