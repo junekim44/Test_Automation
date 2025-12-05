@@ -37,6 +37,22 @@ DEFAULT_CUSTOM_PARAMS = {
     "easyNightBrightness": "1"
 }
 
+# 2. Video Image (Mirroring/Pivot)용 상수
+MIRRORING_OPTS = ["off", "horizontal", "vertical", "both"]
+PIVOT_OPTS = ["off", "clockwise", "counterclockwise"]
+
+# 3. White Balance용 상수 [NEW]
+WB_MODES = {
+    "auto": "Auto",
+    "incandescent": "Incandescent (백열등)",
+    "fluorescent_warm": "Fluorescent Warm (형광등)",
+    "manual": "Manual (수동)"
+}
+
+# Manual 모드일 때 테스트할 Gain 값 (Min/Max)
+WB_GAIN_TEST_VALUES = ["10", "500"]
+
+
 # ===========================================================
 # 📸 [Snapshot] 스크린샷 캡처 함수
 # ===========================================================
@@ -101,6 +117,83 @@ def api_set_video_easy_setting(page: Page, ip: str, params: dict):
             return True
         else:
             # 실패 시 어떤 파라미터가 문제였는지 확인하기 위해 로그 출력
+            print(f"   ❌ [API Fail] 요청: {params}")
+            print(f"   ❌ [API Fail] 응답: {response_text.strip()}")
+            return False
+    except Exception as e:
+        print(f"   🔥 [API Error] {e}")
+        return False
+    
+def api_get_video_image(page: Page, ip: str):
+    """[Read] Video Image 설정 조회"""
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoImage&mode=1"
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+        if response_text and not response_text.startswith("Error"):
+            return parse_api_response(response_text)
+        return None
+    except: return None
+
+def api_set_video_image(page: Page, ip: str, params: dict):
+    """[Write] Video Image 설정 변경"""
+    query_str = "&".join([f"{k}={v}" for k, v in params.items()])
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoImage&mode=0&{query_str}"
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url, { method: 'POST' });
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+        
+        if "returnCode=0" in response_text:
+            return True
+        else:
+            print(f"   ❌ [API Fail] 응답: {response_text.strip()}")
+            return False
+    except Exception as e:
+        print(f"   🔥 [API Error] {e}")
+        return False
+    
+def api_get_video_wb(page: Page, ip: str):
+    """[Read] White Balance 설정 조회"""
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoWb&mode=1"
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+        if response_text and not response_text.startswith("Error"):
+            return parse_api_response(response_text)
+        return None
+    except: return None
+
+def api_set_video_wb(page: Page, ip: str, params: dict):
+    """[Write] White Balance 설정 변경"""
+    query_str = "&".join([f"{k}={v}" for k, v in params.items()])
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action=videoWb&mode=0&{query_str}"
+    try:
+        response_text = page.evaluate("""async (url) => {
+            try {
+                const response = await fetch(url, { method: 'POST' });
+                if (!response.ok) return `Error: ${response.status}`;
+                return await response.text();
+            } catch (e) { return `Error: ${e.message}`; }
+        }""", api_url)
+        
+        if "returnCode=0" in response_text:
+            return True
+        else:
             print(f"   ❌ [API Fail] 요청: {params}")
             print(f"   ❌ [API Fail] 응답: {response_text.strip()}")
             return False
@@ -209,3 +302,187 @@ def run_self_adjust_mode_test(page: Page, camera_ip: str):
         return True, "테스트 성공"
     else:
         return False, f"실패 항목 {failed_count}건"
+    
+# ===========================================================
+# 🧪 [Test Case 2] Video Image (Mirroring / Pivot)
+# ===========================================================
+def run_video_image_test(page: Page, camera_ip: str):
+    print("\n=======================================================")
+    print(f"🎬 [Video] Image Setting (Mirroring / Pivot) Test")
+    print("=======================================================")
+    
+    initial_settings = api_get_video_image(page, camera_ip)
+    if not initial_settings:
+        return False, "초기 설정 조회 실패"
+    
+    if 'returnCode' in initial_settings: del initial_settings['returnCode']
+    
+    failed_count = 0
+
+    # 1. Mirroring
+    print("\n[Step 1] Mirroring 변경 테스트")
+    for mode in MIRRORING_OPTS:
+        print(f"\n   👉 Mirroring 변경: {mode}")
+        
+        payload = initial_settings.copy()
+        payload['mirroring'] = mode
+        
+        if api_set_video_image(page, camera_ip, payload):
+            print(f"   ⏳ 영상 확인 ({WAIT_TIME}초)...")
+            time.sleep(WAIT_TIME)
+            trigger_iras_snapshot()
+            
+            curr = api_get_video_image(page, camera_ip)
+            if curr and curr.get('mirroring') == mode:
+                print(f"   ✅ 검증 성공: {mode}")
+                initial_settings = curr.copy()
+                if 'returnCode' in initial_settings: del initial_settings['returnCode']
+            else:
+                print(f"   ❌ 검증 실패")
+                failed_count += 1
+        else:
+            print("   ❌ API 전송 실패")
+            failed_count += 1
+
+    # 2. Pivot
+    print("\n[Step 2] Pivot 변경 테스트")
+    for mode in PIVOT_OPTS:
+        print(f"\n   👉 Pivot 변경: {mode}")
+        
+        payload = initial_settings.copy()
+        payload['pivot'] = mode
+        
+        if api_set_video_image(page, camera_ip, payload):
+            print(f"   ⏳ 영상 확인 ({WAIT_TIME}초)...")
+            time.sleep(WAIT_TIME)
+            trigger_iras_snapshot()
+            
+            curr = api_get_video_image(page, camera_ip)
+            if curr and curr.get('pivot') == mode:
+                print(f"   ✅ 검증 성공: {mode}")
+                initial_settings = curr.copy()
+                if 'returnCode' in initial_settings: del initial_settings['returnCode']
+            else:
+                print(f"   ❌ 검증 실패")
+                failed_count += 1
+        else:
+            print("   ❌ API 전송 실패")
+            failed_count += 1
+
+    # 3. Restore
+    print("\n[Step 3] 설정 초기화 (off)")
+    restore_payload = initial_settings.copy()
+    restore_payload['mirroring'] = 'off'
+    restore_payload['pivot'] = 'off'
+    
+    if api_set_video_image(page, camera_ip, restore_payload):
+        print("   ✅ 설정 복구 완료")
+    else:
+        print("   ⚠️ 설정 복구 실패")
+
+    if failed_count == 0:
+        return True, "Video Image (Mirroring/Pivot) 성공"
+    else:
+        return False, f"Video Image 실패 ({failed_count}건)"
+    
+# ===========================================================
+# 🧪 [Test Case 3] White Balance Test [NEW]
+# ===========================================================
+def run_white_balance_test(page: Page, camera_ip: str):
+    print("\n=======================================================")
+    print(f"🎬 [Video] White Balance Test")
+    print("=======================================================")
+    
+    # 시작 전 스냅샷
+    trigger_iras_snapshot()
+    
+    # 초기 설정 백업 (테스트 후 복구용은 아니지만 참고용)
+    initial_wb = api_get_video_wb(page, camera_ip)
+    if not initial_wb:
+        return False, "초기 WB 설정 조회 실패"
+    
+    failed_count = 0
+
+    # ---------------------------------------------------------
+    # [Step 1] Preset Mode 변경 테스트
+    # ---------------------------------------------------------
+    print("\n[Step 1] White Balance Preset 변경 테스트")
+    
+    for mode_val, mode_name in WB_MODES.items():
+        # Manual 모드는 별도로 테스트하므로 패스 (또는 단순 전환만 확인)
+        if mode_val == "manual": continue
+            
+        print(f"\n   👉 모드 변경: {mode_name}")
+        if api_set_video_wb(page, camera_ip, {"wbMode": mode_val}):
+            print(f"   ⏳ 적용 대기 ({WAIT_TIME}s)...")
+            time.sleep(WAIT_TIME)
+            trigger_iras_snapshot()
+            
+            curr = api_get_video_wb(page, camera_ip)
+            if curr and curr.get("wbMode") == mode_val:
+                print(f"   ✅ 검증 성공: {mode_val}")
+            else:
+                print(f"   ❌ 검증 실패: {mode_val} (Actual: {curr.get('wbMode')})")
+                failed_count += 1
+        else:
+            print("   ❌ API 전송 실패")
+            failed_count += 1
+
+    # ---------------------------------------------------------
+    # [Step 2] Manual Mode & RGB Gain 테스트
+    # ---------------------------------------------------------
+    print("\n[Step 2] Manual Mode 및 Gain(Red/Blue) 테스트")
+    print("   👉 모드 변경: Manual")
+    
+    # Manual 모드 진입
+    if api_set_video_wb(page, camera_ip, {"wbMode": "manual"}):
+        time.sleep(2)
+        trigger_iras_snapshot()
+    else:
+        return False, "Manual 모드 진입 실패"
+
+    # Red/Blue Gain Min/Max 테스트
+    # (wbMode=manual을 같이 보내야 안전함)
+    gain_targets = [("redGain", "Red Gain"), ("blueGain", "Blue Gain")]
+    
+    for param_key, param_name in gain_targets:
+        print(f"\n   --- [Target: {param_name}] ---")
+        for val in WB_GAIN_TEST_VALUES:
+            print(f"   👉 값 변경: {val}")
+            
+            payload = {
+                "wbMode": "manual",
+                param_key: val
+            }
+            
+            if api_set_video_wb(page, camera_ip, payload):
+                print(f"   ⏳ 적용 대기 ({WAIT_TIME}s)...")
+                time.sleep(WAIT_TIME)
+                trigger_iras_snapshot()
+                
+                curr = api_get_video_wb(page, camera_ip)
+                if curr and curr.get(param_key) == val:
+                    print(f"   ✅ {param_name}={val} 적용 확인")
+                else:
+                    actual = curr.get(param_key) if curr else "None"
+                    print(f"   ❌ 실패: 기대({val}) != 실제({actual})")
+                    failed_count += 1
+            else:
+                print("   ❌ API 전송 실패")
+                failed_count += 1
+
+    # ---------------------------------------------------------
+    # [Step 3] 복구 (Auto Mode)
+    # ---------------------------------------------------------
+    print("\n[Step 3] 설정 초기화 (Auto)")
+    if api_set_video_wb(page, camera_ip, {"wbMode": "auto"}):
+        time.sleep(2)
+        trigger_iras_snapshot()
+        print("   ✅ 설정 복구 완료")
+    else:
+        print("   ⚠️ 설정 복구 실패")
+
+    if failed_count == 0:
+        return True, "White Balance Test 성공"
+    else:
+        return False, f"White Balance Test 실패 ({failed_count}건)"

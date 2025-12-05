@@ -17,7 +17,7 @@ try:
     from language_test import run_all_languages_test # 필요시 주석 해제
     from datetime_test import run_datetime_tests
     from user_group_tests import run_user_group_test
-    from video_test import run_self_adjust_mode_test
+    from video_test import run_self_adjust_mode_test, run_video_image_test, run_white_balance_test
 except ImportError as e:
     print(f"오류: 파일이나 함수를 찾을 수 없습니다. {e}")
     exit()
@@ -113,8 +113,20 @@ def main():
             # except subprocess.CalledProcessError:
             #     raise Exception("네트워크 테스트 프로세스가 실패 코드를 반환했습니다.")
             
-            # [Video] Self Adjust Mode (Easy Video Setting) 테스트
-            success, msg = run_self_adjust_mode_test(page, CAMERA_IP)
+            # # [Video] Self Adjust Mode (Easy Video Setting) 테스트
+            # success, msg = run_self_adjust_mode_test(page, CAMERA_IP)
+            # if not success: raise Exception(msg)
+            # print(f"🎉 [성공] {msg}")
+
+            # --- [Test 2] Video - Image (Mirroring/Pivot) ---
+            print("\n🎥 [Video] Image Setting (Mirroring/Pivot) 테스트 시작...")
+            success, msg = run_video_image_test(page, CAMERA_IP)
+            if not success: raise Exception(msg)
+            print(f"🎉 [성공] {msg}")
+
+            # --- [Test 3] White Balance ---
+            print("\n🎥 [Video] White Balance 테스트 시작...")
+            success, msg = run_white_balance_test(page, CAMERA_IP)
             if not success: raise Exception(msg)
             print(f"🎉 [성공] {msg}")
 
