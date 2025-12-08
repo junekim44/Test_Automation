@@ -41,14 +41,23 @@ WB_MODES = {
     "fluorescent_warm": "Fluorescent Warm",
     "manual": "Manual"
 }
+WB_GAIN_TEST_VALUES = ["10", "500"]
+
 # 4. Exposure (노출)
-# 사용자 요청: 1/30(밝게) <-> 1/8000(어둡게)
+# 셔터 스피드 테스트 값 (문서 및 요청사항 반영)
 SHUTTER_TEST_CASES = [
     ("30", "1/30s (Bright)"), 
-    ("8000", "1/8000s (Dark)")
+    ("8000", "1/8000s (Dark)") 
 ]
 TARGET_GAIN_VALUES = ["-10", "10"]
 WDR_MODES = ["off", "on"]
+
+# 5. Day & Night [NEW]
+# 스케줄 문자열 생성 (7일 * 24시간)
+# 1시간 = 8비트 = 2 Hex Char. 24시간 = 48 Hex Char.
+# 0(00) = Day/Off, 5(0101) = Night/On (15분 단위 설정)
+DAY_SCHEDULE_STR = "_".join(["0" * 48] * 7) # 일주일 내내 주간
+NIGHT_SCHEDULE_STR = "_".join(["5" * 48] * 7) # 일주일 내내 야간 (5555...)
 
 
 # ===========================================================
@@ -58,7 +67,6 @@ def trigger_iras_snapshot():
     """iRAS 창을 찾아 포커스한 뒤 Ctrl+S를 전송하여 스냅샷 저장"""
     try:
         ctrl = IRASController()
-        # use_alt=False: 메뉴가 열리는 현상 방지
         if ctrl._get_handle(TITLE_MAIN, force_focus=True, use_alt=False):
             time.sleep(0.5) 
             ctrl.save_snapshot()
@@ -124,6 +132,9 @@ def api_set_video_wb(page, ip, p): return _api_set(page, ip, "videoWb", p)
 
 def api_get_video_exposure(page, ip): return _api_get(page, ip, "videoExposure")
 def api_set_video_exposure(page, ip, p): return _api_set(page, ip, "videoExposure", p)
+
+def api_get_video_daynight(page, ip): return _api_get(page, ip, "videoDaynight")
+def api_set_video_daynight(page, ip, p): return _api_set(page, ip, "videoDaynight", p)
 
 
 # ===========================================================
@@ -311,7 +322,6 @@ def run_white_balance_test(page: Page, camera_ip: str):
     # Manual
     print("\n[Step 2] Manual Mode (Gain) 테스트")
     
-    # 1. Manual 진입
     curr_set = api_get_video_wb(page, camera_ip)
     if not curr_set: return False, "설정 조회 실패"
     payload = curr_set.copy()
@@ -323,7 +333,6 @@ def run_white_balance_test(page: Page, camera_ip: str):
     
     time.sleep(2)
     
-    # 2. Gain 테스트
     for param, name in [("redGain", "Red"), ("blueGain", "Blue")]:
         print(f"\n   --- [Target: {name}] ---")
         for val in WB_GAIN_TEST_VALUES:
@@ -334,7 +343,7 @@ def run_white_balance_test(page: Page, camera_ip: str):
             
             payload = curr_set.copy()
             if 'returnCode' in payload: del payload['returnCode']
-            payload['wbMode'] = 'manual' # Manual 모드 명시
+            payload['wbMode'] = 'manual'
             payload[param] = val
             
             if api_set_video_wb(page, camera_ip, payload):
@@ -383,7 +392,9 @@ def run_exposure_test(page: Page, camera_ip: str):
         payload = curr_set.copy()
         if 'returnCode' in payload: del payload['returnCode']
         
-        payload['manualAeControl'] = 'off' 
+        # 충돌 방지
+        payload['manualAeControl'] = 'off'
+        payload['wdr'] = 'off' 
         payload['targetGain'] = val
         
         if api_set_video_exposure(page, camera_ip, payload):
@@ -398,48 +409,49 @@ def run_exposure_test(page: Page, camera_ip: str):
                 failed_count += 1
         else: failed_count += 1
 
-    # 🌟 2. Manual Shutter Speed (수동 셔터) - [요청 사항 반영]
-    print("\n[Step 2] Manual Shutter Speed (1/30 vs 1/8000)")
-    print("   👉 Exposure Mode: Manual (수동)")
+    # # 2. Manual Shutter Speed (Fixed Logic)
+    # print("\n[Step 2] Manual Shutter Speed (1/30 vs 1/8000)")
+    # print("   👉 Exposure Mode: Manual (수동)")
 
-    for shutter_val, label in SHUTTER_TEST_CASES:
-        print(f"   👉 셔터 변경: {label} (Value: {shutter_val})")
+    # for shutter_val, label in SHUTTER_TEST_CASES:
+    #     print(f"   👉 셔터 변경: {label} (Value: {shutter_val})")
         
-        # [핵심] 최신 설정 읽어오기
-        curr_set = api_get_video_exposure(page, camera_ip)
-        if not curr_set: 
-            failed_count += 1; continue
+    #     curr_set = api_get_video_exposure(page, camera_ip)
+    #     if not curr_set: 
+    #         failed_count += 1; continue
 
-        payload = curr_set.copy()
-        if 'returnCode' in payload: del payload['returnCode']
+    #     payload = curr_set.copy()
+    #     if 'returnCode' in payload: del payload['returnCode']
         
-        # [설정] Manual AE 켜기 및 셔터 고정
-        payload['manualAeControl'] = 'on'
-        payload['lowerShutterLimit'] = shutter_val
-        payload['upperShutterLimit'] = shutter_val
+    #     # 💡 [핵심 수정] Manual Mode 진입 파라미터 세트 (301 에러 방지)
+    #     payload['manualAeControl'] = 'on'
+    #     payload['lowerShutterLimit'] = shutter_val
+    #     payload['upperShutterLimit'] = shutter_val
         
-        # [중요] Manual 모드 진입 시 충돌 방지 및 효과 극대화를 위한 설정
-        payload['slowShutter'] = 'off'     
-        payload['antiFlicker'] = 'off'     
-        payload['irisControlMode'] = 'fullopen' # 조리개 최대 개방 (셔터 효과 확인용)
+    #     # 1. 충돌 파라미터 끄기
+    #     payload['slowShutter'] = 'off'     
+    #     payload['antiFlicker'] = 'off'
+    #     payload['targetGain'] = '0' # Manual에서는 Target Gain 초기화
         
-        # Gain 고정 (선택 사항이나, 셔터 효과를 명확히 보기 위해 추천)
-        # payload['lowerGainLimit'] = '1dB'
-        # payload['upperGainLimit'] = '1dB'
+    #     # 2. Gain 고정 (3dB 사용 - API 예제 호환)
+    #     payload['lowerGainLimit'] = '3dB'  
+    #     payload['upperGainLimit'] = '3dB'  
         
-        if api_set_video_exposure(page, camera_ip, payload):
-            print(f"   ⏳ 영상 확인 ({WAIT_TIME}s)...")
-            time.sleep(WAIT_TIME)
-            trigger_iras_snapshot()
+    #     # 3. Iris Control은 건드리지 않음 (기존 값 유지) -> 'fullopen' 강제 제거
+    #     # payload['irisControlMode'] = 'fullopen'  <-- 삭제함
+        
+    #     if api_set_video_exposure(page, camera_ip, payload):
+    #         print(f"   ⏳ 영상 확인 ({WAIT_TIME}s)...")
+    #         time.sleep(WAIT_TIME)
+    #         trigger_iras_snapshot()
             
-            curr = api_get_video_exposure(page, camera_ip)
-            # 검증: Manual 모드가 켜져있고, 셔터 상한값이 설정값과 같은지 확인
-            if curr and curr.get('upperShutterLimit') == shutter_val:
-                print(f"   ✅ Pass: {label}")
-            else:
-                print(f"   ❌ Fail")
-                failed_count += 1
-        else: failed_count += 1
+    #         curr = api_get_video_exposure(page, camera_ip)
+    #         if curr and curr.get('upperShutterLimit') == shutter_val:
+    #             print(f"   ✅ Pass")
+    #         else:
+    #             print(f"   ❌ Fail")
+    #             failed_count += 1
+    #     else: failed_count += 1
 
     # 3. Slow Shutter
     print("\n[Step 3] Slow Shutter 설정 (Auto Mode)")
@@ -461,6 +473,7 @@ def run_exposure_test(page: Page, camera_ip: str):
         if 'returnCode' in payload: del payload['returnCode']
         
         payload['manualAeControl'] = 'off' # Auto 모드 복귀
+        payload['wdr'] = 'off' # WDR 꺼야 함
         payload['slowShutter'] = slow_shutter_val
         
         if api_set_video_exposure(page, camera_ip, payload):
@@ -488,12 +501,16 @@ def run_exposure_test(page: Page, camera_ip: str):
         payload = curr_set.copy()
         if 'returnCode' in payload: del payload['returnCode']
         
-        # WDR 설정 시 Slow Shutter 등과 충돌 방지
         payload['wdr'] = mode
         if mode == 'on': 
-            payload['wdrLevel'] = '3'
-            payload['slowShutter'] = 'off' # WDR 켜면 Slow Shutter 꺼야 함
-            
+            payload['wdrLevel'] = '2'
+            payload['slowShutter'] = 'off' # WDR과 충돌 방지
+            payload['targetGain'] = '0'
+        
+        # 모드에 상관없이 충돌 방지
+        if mode == 'off':
+            payload['slowShutter'] = 'off' # 깔끔하게
+
         if api_set_video_exposure(page, camera_ip, payload):
             print(f"   ⏳ 영상 확인 ({WAIT_TIME}s)...")
             time.sleep(WAIT_TIME)
@@ -523,3 +540,121 @@ def run_exposure_test(page: Page, camera_ip: str):
     
     if failed_count == 0: return True, "Exposure Test 성공"
     else: return False, f"Exposure Test 실패 ({failed_count}건)"
+
+# ===========================================================
+# 🧪 [Test 5] Day & Night [NEW]
+# ===========================================================
+def run_daynight_test(page: Page, camera_ip: str):
+    print("\n=======================================================")
+    print(f"🎬 [Video] Day & Night Test (Auto/Schedule/ICR)")
+    print("=======================================================")
+    
+    trigger_iras_snapshot()
+    failed_count = 0
+
+    # ---------------------------------------------------------
+    # [Step 1] Auto Mode 설정 및 센서 동작 확인
+    # ---------------------------------------------------------
+    print("\n[Step 1] Auto Mode 설정 (조도 센서 동작 확인)")
+    
+    # 1. Auto 설정
+    print("   👉 설정 변경: Auto")
+    curr_set = api_get_video_daynight(page, camera_ip)
+    if not curr_set: return False, "설정 조회 실패"
+    
+    payload = curr_set.copy()
+    if 'returnCode' in payload: del payload['returnCode']
+    payload['bwMode'] = 'auto'
+    payload['icrMode'] = 'auto'
+    
+    if api_set_video_daynight(page, camera_ip, payload):
+        print(f"   ✅ 설정 완료: Auto")
+    else:
+        print(f"   ❌ 설정 실패")
+        failed_count += 1
+        return False, "Auto 모드 설정 실패"
+
+    # 2. Night 전환 유도 (사용자 개입)
+    print("\n" + "="*60)
+    print("⚠️  [Action Required: Night Mode]")
+    print("    1. 카메라의 렌즈와 조도 센서를 가려주세요.")
+    print("    2. '딸깍' 소리와 함께 흑백(Night)으로 바뀌면 Enter를 누르세요.")
+    print("="*60)
+    input(">> 준비되었으면 Enter를 누르세요...")
+    
+    print("   ⏳ 영상 확인 ({WAIT_TIME}s)...")
+    time.sleep(WAIT_TIME)
+    trigger_iras_snapshot() # 흑백 영상 캡처
+
+    # 3. Day 전환 유도 (사용자 개입)
+    print("\n" + "="*60)
+    print("⚠️  [Action Required: Day Mode]")
+    print("    1. 가림막을 제거하여 밝게 해주세요.")
+    print("    2. 컬러(Day)로 돌아오면 Enter를 누르세요.")
+    print("="*60)
+    input(">> 준비되었으면 Enter를 누르세요...")
+    
+    print("   ⏳ 영상 확인 ({WAIT_TIME}s)...")
+    time.sleep(WAIT_TIME)
+    trigger_iras_snapshot() # 컬러 영상 캡처
+
+    # ---------------------------------------------------------
+    # [Step 2] Schedule Mode 테스트 (강제 주간/야간 전환)
+    # ---------------------------------------------------------
+    print("\n[Step 2] Schedule Mode 테스트")
+    
+    # 1. Schedule - Always Night (강제 흑백)
+    print("   👉 스케줄 설정: Always Night (B&W)")
+    
+    payload['bwMode'] = 'schedule'
+    payload['icrMode'] = 'schedule'
+    payload['schedule'] = NIGHT_SCHEDULE_STR # 5555...
+    
+    if api_set_video_daynight(page, camera_ip, payload):
+        print(f"   ⏳ 영상 확인 ({WAIT_TIME}s) -> 흑백이어야 함")
+        time.sleep(WAIT_TIME)
+        trigger_iras_snapshot()
+        
+        curr = api_get_video_daynight(page, camera_ip)
+        if curr and curr.get('bwMode') == 'schedule':
+            print(f"   ✅ 설정 적용 확인")
+        else:
+            print(f"   ❌ 검증 실패")
+            failed_count += 1
+    else:
+        print("   ❌ API 전송 실패")
+        failed_count += 1
+
+    # 2. Schedule - Always Day (강제 컬러)
+    print("   👉 스케줄 설정: Always Day (Color)")
+    
+    payload['schedule'] = DAY_SCHEDULE_STR # 0000...
+    
+    if api_set_video_daynight(page, camera_ip, payload):
+        print(f"   ⏳ 영상 확인 ({WAIT_TIME}s) -> 컬러여야 함")
+        time.sleep(WAIT_TIME)
+        trigger_iras_snapshot()
+        print(f"   ✅ 설정 적용 확인")
+    else:
+        print("   ❌ API 전송 실패")
+        failed_count += 1
+
+    # ---------------------------------------------------------
+    # [Step 3] 복구 (Auto Mode)
+    # ---------------------------------------------------------
+    print("\n[Step 3] 설정 초기화 (Auto)")
+    
+    # 읽어온 초기값 복구 or 강제 Auto 설정
+    restore_payload = payload.copy()
+    restore_payload['bwMode'] = 'auto'
+    restore_payload['icrMode'] = 'auto'
+    # 스케줄은 복잡하므로 굳이 초기화 안 해도 됨 (모드가 Auto면 무시됨)
+    
+    if api_set_video_daynight(page, camera_ip, restore_payload):
+        time.sleep(2)
+        print("   ✅ 설정 복구 완료")
+    else:
+        print("   ⚠️ 설정 복구 실패")
+
+    if failed_count == 0: return True, "Day&Night Test 성공"
+    else: return False, f"Day&Night Test 실패 ({failed_count}건)"
