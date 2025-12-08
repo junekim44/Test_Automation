@@ -59,6 +59,9 @@ WDR_MODES = ["off", "on"]
 DAY_SCHEDULE_STR = "_".join(["0" * 48] * 7) # 일주일 내내 주간
 NIGHT_SCHEDULE_STR = "_".join(["5" * 48] * 7) # 일주일 내내 야간 (5555...)
 
+# 6. Miscellaneous (EIS) [NEW]
+EIS_MODES = ["off", "on"]
+
 
 # ===========================================================
 # 📸 [Snapshot] 스크린샷 캡처 함수
@@ -136,6 +139,8 @@ def api_set_video_exposure(page, ip, p): return _api_set(page, ip, "videoExposur
 def api_get_video_daynight(page, ip): return _api_get(page, ip, "videoDaynight")
 def api_set_video_daynight(page, ip, p): return _api_set(page, ip, "videoDaynight", p)
 
+def api_get_video_misc(page, ip): return _api_get(page, ip, "videoMisc")
+def api_set_video_misc(page, ip, p): return _api_set(page, ip, "videoMisc", p)
 
 # ===========================================================
 # 🧪 [Test 1] Self Adjust Mode
@@ -658,3 +663,67 @@ def run_daynight_test(page: Page, camera_ip: str):
 
     if failed_count == 0: return True, "Day&Night Test 성공"
     else: return False, f"Day&Night Test 실패 ({failed_count}건)"
+
+# ===========================================================
+# 🧪 [Test 6] Video Misc (EIS) [NEW]
+# ===========================================================
+def run_video_misc_test(page: Page, camera_ip: str):
+    print("\n=======================================================")
+    print(f"🎬 [Video] Miscellaneous Test (EIS Crop Check)")
+    print("=======================================================")
+    
+    trigger_iras_snapshot()
+    failed_count = 0
+
+    # 초기 설정 백업
+    curr_set = api_get_video_misc(page, camera_ip)
+    if not curr_set: return False, "설정 조회 실패"
+    
+    # 301 에러 방지 (Read-Only 제거)
+    if 'returnCode' in curr_set: del curr_set['returnCode']
+
+    # 1. EIS OFF (기준점)
+    print("\n[Step 1] EIS Off (Original Image)")
+    payload = curr_set.copy()
+    payload['imageStabilizer'] = 'off'
+    
+    if api_set_video_misc(page, camera_ip, payload):
+        print(f"   ⏳ 영상 확인 ({WAIT_TIME}s)...")
+        time.sleep(WAIT_TIME)
+        trigger_iras_snapshot()
+        print(f"   ✅ 설정 완료: Off")
+    else:
+        print(f"   ❌ 설정 실패")
+        failed_count += 1
+
+    # 2. EIS ON (크롭 확인)
+    print("\n[Step 2] EIS On (Check Crop)")
+    print("   ℹ️  EIS를 켜면 영상 가장자리가 잘려나가 화각이 좁아지는지 확인하세요.")
+    
+    payload['imageStabilizer'] = 'on'
+    
+    if api_set_video_misc(page, camera_ip, payload):
+        print(f"   ⏳ 영상 확인 ({WAIT_TIME}s)...")
+        time.sleep(WAIT_TIME)
+        trigger_iras_snapshot()
+        
+        curr = api_get_video_misc(page, camera_ip)
+        if curr and curr.get('imageStabilizer') == 'on':
+            print(f"   ✅ 설정 적용 확인 (EIS On)")
+        else:
+            print(f"   ❌ 검증 실패")
+            failed_count += 1
+    else:
+        print(f"   ❌ API 전송 실패")
+        failed_count += 1
+
+    # 3. Restore (Off)
+    print("\n[Step 3] 복구 (EIS Off)")
+    payload['imageStabilizer'] = 'off'
+    if api_set_video_misc(page, camera_ip, payload):
+        print("   ✅ 설정 복구 완료")
+    else:
+        print("   ⚠️ 설정 복구 실패")
+
+    if failed_count == 0: return True, "Video Misc (EIS) Test 성공"
+    else: return False, f"Video Misc (EIS) Test 실패 ({failed_count}건)"

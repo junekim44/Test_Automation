@@ -17,7 +17,7 @@ try:
     from language_test import run_all_languages_test # 필요시 주석 해제
     from datetime_test import run_datetime_tests
     from user_group_tests import run_user_group_test
-    from video_test import run_self_adjust_mode_test, run_video_image_test, run_white_balance_test, run_exposure_test, run_daynight_test
+    from video_test import run_self_adjust_mode_test, run_video_image_test, run_white_balance_test, run_exposure_test, run_daynight_test, run_video_misc_test
 except ImportError as e:
     print(f"오류: 파일이나 함수를 찾을 수 없습니다. {e}")
     exit()
@@ -138,6 +138,12 @@ def main():
             # --- [Test 5] Day & Night [NEW] ---
             print("\n🎥 [Video] Day & Night 테스트 시작...")
             success, msg = run_daynight_test(page, CAMERA_IP)
+            if not success: raise Exception(msg)
+            print(f"🎉 [성공] {msg}")
+
+            # --- [Test 6] Video Misc (EIS) ---
+            print("\n🎥 [Video] Misc (EIS) 테스트 시작...")
+            success, msg = run_video_misc_test(page, CAMERA_IP)
             if not success: raise Exception(msg)
             print(f"🎉 [성공] {msg}")
 
