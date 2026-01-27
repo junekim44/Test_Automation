@@ -154,6 +154,10 @@ class CameraApiClient:
     def get_group_setup(self) -> Optional[Dict[str, Any]]:
         """그룹 설정 조회"""
         return self.get("groupSetup")
+
+    def get_action_alarmout(self) -> Optional[Dict[str, Any]]:
+        """알람 아웃 설정 조회 (actionAlarmout)"""
+        return self.get("actionAlarmout")
     
     def set_group_setup(self, group_write_mode: str, group_name: str = None, 
                        authorities: str = None, allow_anonymous_login: str = None,
@@ -255,6 +259,25 @@ class CameraApiClient:
             group_name=group_name,
             authorities=authorities
         )
+    
+    def set_action_alarmout(self, use_alarm_out: str = "on", dwell_time: str = "20", 
+                            start: str = "00:00", end: str = "24:00") -> bool:
+        """
+        알람 출력 설정 변경
+        Args:
+            use_alarm_out: "on" | "off"
+            dwell_time: 유지 시간 (기본 20초)
+            start/end: 스케줄 시작/종료 시간
+        """
+        params = {
+            "useAlarmOut": use_alarm_out,
+            "dwellTime": dwell_time,
+            "scheduleStart": start,
+            "scheduleEnd": end
+        }
+        print(f"   📡 [API] 알람 출력 설정 변경: {use_alarm_out}")
+        return self.set("actionAlarmout", params)
+    
     # Video 관련
     def get_video_easy_setting(self) -> Optional[Dict[str, Any]]:
         return self.get("videoEasySetting")
