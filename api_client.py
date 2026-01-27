@@ -53,14 +53,15 @@ class CameraApiClient:
                     else:
                         api_url = f"{self.base_url}?action={action}&mode={mode}"
                 
-                response_text = self.page.evaluate("""async (url, method) => {
+                response_text = self.page.evaluate("""async (args) => {
                     try {
+                        const { url, method } = args;
                         const options = method === 'POST' ? { method: 'POST' } : {};
                         const response = await fetch(url, options);
                         if (!response.ok) return `Error: ${response.status}`;
                         return await response.text();
                     } catch (e) { return `Error: ${e.message}`; }
-                }""", api_url, method)
+                }""", {"url": api_url, "method": method})
                 
                 # 401 에러 처리
                 if "Error: 401" in response_text and retry_on_401:
@@ -70,6 +71,15 @@ class CameraApiClient:
                         self.page.wait_for_selector("#Page200_id", timeout=TIMEOUTS["page_load"])
                         time.sleep(TIMEOUTS["retry_delay"])
                         continue
+                
+                # 403 에러 처리 (HTTPS 필요)
+                if "Error: 403" in response_text:
+                    if action == "userSetup":
+                        print(f"   ⚠️ [API] 403 Forbidden: userSetup API는 HTTPS 또는 RSA 암호화가 필요합니다.")
+                        print(f"   💡 [Tip] 사용자 관리 작업은 UI로 폴백합니다.")
+                    else:
+                        print(f"⚠️ [API] 403 Forbidden: {response_text}")
+                    return None
                 
                 # 에러 응답 처리
                 if response_text and response_text.startswith("Error"):
@@ -145,6 +155,106 @@ class CameraApiClient:
         """그룹 설정 조회"""
         return self.get("groupSetup")
     
+    def set_group_setup(self, group_write_mode: str, group_name: str = None, 
+                       authorities: str = None, allow_anonymous_login: str = None,
+                       allow_anonymous_ptz: str = None) -> bool:
+        """
+        그룹 설정 변경 (생성/수정/삭제)
+        
+        Args:
+            group_write_mode: "add" | "edit" | "remove"
+            group_name: 그룹 이름 (add/edit 시 필수)
+            authorities: 권한 문자열 (예: "setup|search|ptz", add/edit 시 선택)
+            allow_anonymous_login: "on" | "off" (선택)
+            allow_anonymous_ptz: "on" | "off" (선택)
+        
+        Returns:
+            성공 여부
+        """
+        params = {"groupWriteMode": group_write_mode}
+        if group_name:
+            params["groupName"] = group_name
+        if authorities:
+            params["authorities"] = authorities
+        if allow_anonymous_login:
+            params["allowAnonymousLogin"] = allow_anonymous_login
+        if allow_anonymous_ptz:
+            params["allowAnonymousPTZ"] = allow_anonymous_ptz
+        
+        return self.set("groupSetup", params)
+    
+    def get_user_setup(self) -> Optional[Dict[str, Any]]:
+        """사용자 설정 조회"""
+        return self.get("userSetup")
+    
+    def set_user_setup(self, user_write_mode: str, user_name: str = None,
+                       user_password: str = None, user_group: str = None,
+                       user_email: str = None, user_sms: str = None,
+                       user_country: str = None) -> bool:
+        """
+        사용자 설정 변경 (생성/수정/삭제)
+        
+        ⚠️ 주의: userSetup은 HTTPS 또는 RSA 암호화가 필요할 수 있습니다.
+        HTTP로 동작하지 않으면 HTTPS로 시도하거나 RSA 암호화를 구현해야 합니다.
+        
+        Args:
+            user_write_mode: "add" | "edit" | "remove"
+            user_name: 사용자 ID (필수)
+            user_password: 비밀번호 (add/edit 시 필수, remove 시 불필요)
+            user_group: 그룹 이름 (예: "Administrator", "User", 또는 사용자 정의 그룹)
+            user_email: 이메일 (선택)
+            user_sms: SMS 번호 (선택)
+            user_country: 국가 코드 (선택, 예: "82" for Korea)
+        
+        Returns:
+            성공 여부
+        """
+        params = {"userWriteMode": user_write_mode}
+        if user_name:
+            params["userName"] = user_name
+        if user_password:
+            params["userPassword"] = user_password
+        if user_group:
+            params["userGroup"] = user_group
+        if user_email:
+            params["userEmail"] = user_email
+        if user_sms:
+            params["userSms"] = user_sms
+        if user_country:
+            params["userCountry"] = user_country
+        
+        return self.set("userSetup", params)
+    
+    def set_group_permissions(self, group_name: str, permissions: dict, 
+                              ui_to_api_map: dict) -> bool:
+        """
+        그룹 권한 설정 (UI 권한 딕셔너리를 API 형식으로 변환)
+        
+        Args:
+            group_name: 그룹 이름
+            permissions: UI 권한 딕셔너리 (예: {"설정": True, "검색": False, ...})
+            ui_to_api_map: UI 이름 → API 이름 매핑 (예: {"설정": "setup", ...})
+        
+        Returns:
+            성공 여부
+        """
+        # True인 권한만 추출하여 API 형식으로 변환
+        enabled_perms = []
+        for ui_name, is_enabled in permissions.items():
+            if is_enabled:
+                api_name = ui_to_api_map.get(ui_name)
+                if api_name:
+                    enabled_perms.append(api_name)
+        
+        # 권한 문자열 생성 (예: "setup|search|clipCopy")
+        authorities = "|".join(enabled_perms) if enabled_perms else ""
+        
+        print(f"   📡 [API] 그룹 '{group_name}' 권한 설정: {authorities}")
+        return self.set_group_setup(
+            group_write_mode="edit",
+            group_name=group_name,
+            authorities=authorities
+        )
     # Video 관련
     def get_video_easy_setting(self) -> Optional[Dict[str, Any]]:
         return self.get("videoEasySetting")
