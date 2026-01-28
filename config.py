@@ -67,23 +67,10 @@ IRAS_COORDS = {
     "menu_modify": (50, 20),        # 장치 수정
     "menu_remote": (50, 45),        # 원격 설정
     "menu_fw_up": (50, 70),         # 펌웨어 업그레이드
-    "menu_playback": (50, 100),     # 녹화 영상 검색
-    "menu_ptz": (50, 125),          # PTZ 제어
-    "menu_color": (50, 175),        # 컬러 제어
-    "menu_alarm": (50, 250),        # 알람 출력 제어
-    "alarm_on": (150, 0),           # 알람 > 켜기 (상대좌표)
-    "clip_copy": (30, 0),           # 클립 복사 메뉴
-}
-
-# 피시아이 iRAS 마우스 상대 좌표 (우클릭 메뉴 위치)
-Fisheye_IRAS_COORDS = {
-    "menu_modify": (50, 20),        # 장치 수정
-    "menu_remote": (50, 45),        # 원격 설정
-    "menu_fw_up": (50, 70),         # 펌웨어 업그레이드
-    "menu_playback": (50, 125),     # 녹화 영상 검색
-    "menu_ptz": (50, 150),          # PTZ 제어
-    "menu_color": (50, 200),        # 컬러 제어
-    "menu_alarm": (50, 275),        # 알람 출력 제어
+    "menu_playback": (50, 150),     # 녹화 영상 검색
+    "menu_ptz": (50, 175),          # PTZ 제어
+    "menu_color": (50, 225),        # 컬러 제어
+    "menu_alarm": (50, 300),        # 알람 출력 제어
     "alarm_on": (150, 0),           # 알람 > 켜기 (상대좌표)
     "clip_copy": (30, 0),           # 클립 복사 메뉴
 }
@@ -122,7 +109,7 @@ IRAS_DELAYS = {
 
 # iRAS 감시 화면 클릭 오프셋
 IRAS_SURVEILLANCE_OFFSETS = {
-    "right_click_top": 100,         # 우클릭 상단 오프셋
+    "right_click_top": 20,         # 우클릭 상단 오프셋
     "right_click_mid": 50,          # 우클릭 중간 오프셋
     "device_list": 25,             # 장치 리스트 클릭 오프셋
 }
