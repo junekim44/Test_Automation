@@ -6,7 +6,7 @@
 # ===========================================================
 # 📋 카메라 기본 설정
 # ===========================================================
-CAMERA_IP = "10.0.131.113"
+CAMERA_IP = "10.0.131.112"
 CAMERA_PORT = "80"
 CAMERA_URL = f"http://{CAMERA_IP}/setup"
 USERNAME = "admin"
@@ -31,7 +31,7 @@ SCAN_AUTO_NET = "169.254.0.0/16"
 # ===========================================================
 # 🖥️ iRAS 설정
 # ===========================================================
-IRAS_DEVICE_NAME = "113_Y8D11"  # iRAS 테스트용 장치 이름
+IRAS_DEVICE_NAME = "112_Y8D11"  # iRAS 테스트용 장치 이름
 
 # iRAS 창 제목
 IRAS_TITLES = {
@@ -147,6 +147,70 @@ TIMEOUTS = {
 # 🎬 비디오 테스트 설정
 # ===========================================================
 VIDEO_WAIT_TIME = 5  # iRAS 영상 변화 관찰 대기 시간 (초)
+
+# 1. Easy Video Setting (Self Adjust)
+VIDEO_PRESET_MODES = {
+    "1": "Natural (자연스러운)",
+    "2": "Vivid (선명한)",
+    "3": "Denoise (노이즈 감소)"
+}
+
+VIDEO_PARAM_RANGES = {
+    "Sharpness": ["0", "3"],
+    "Contrast": ["0", "2"],
+    "Brightness": ["0", "2"],
+    "Colors": ["0", "2"]
+}
+
+VIDEO_DEFAULT_CUSTOM_PARAMS = {
+    "easyDayType": "0", "easyNightType": "0",
+    "easyDaySharpness": "1", "easyDayContrast": "1", "easyDayBrightness": "1", "easyDayColors": "1",
+    "easyNightSharpness": "1", "easyNightGamma": "1", "easyNightBrightness": "1"
+}
+
+# 2. Video Image (Mirroring/Pivot)
+VIDEO_MIRRORING_OPTS = ["off", "horizontal", "vertical", "both"]
+VIDEO_PIVOT_OPTS = ["off", "clockwise", "counterclockwise"]
+
+# 3. White Balance
+VIDEO_WB_MODES = {
+    "auto": "Auto",
+    "incandescent": "Incandescent",
+    "fluorescent_warm": "Fluorescent Warm",
+    "manual": "Manual"
+}
+VIDEO_WB_GAIN_TEST_VALUES = ["10", "500"]
+
+# 4. Exposure (노출)
+VIDEO_SHUTTER_TEST_CASES = [
+    ("30", "1/30s (Bright)"), 
+    ("8000", "1/8000s (Dark)") 
+]
+VIDEO_TARGET_GAIN_VALUES = ["-10", "10"]
+VIDEO_WDR_MODES = ["off", "on"]
+
+# 5. Day & Night
+# 스케줄 문자열 생성 (7일 * 24시간)
+# 1시간 = 8비트 = 2 Hex Char. 24시간 = 48 Hex Char.
+# 0(00) = Day/Off, 5(0101) = Night/On (15분 단위 설정)
+VIDEO_DAY_SCHEDULE_STR = "_".join(["0" * 48] * 7)  # 일주일 내내 주간
+VIDEO_NIGHT_SCHEDULE_STR = "_".join(["5" * 48] * 7)  # 일주일 내내 야간 (5555...)
+
+# 6. Miscellaneous (EIS)
+VIDEO_EIS_MODES = ["off", "on"]
+
+# 7. Streaming Test
+VIDEO_STREAMING_TARGET_STREAM = "1"  # 주로 1번 스트림 테스트
+VIDEO_STREAMING_CODECS = ["h265", "h264"]
+VIDEO_STREAMING_RESOLUTIONS = ["1920x1080", "1280x720"]
+VIDEO_STREAMING_IPS_VALUES = ["30", "5"]  # Max, Min
+VIDEO_STREAMING_BITRATE_MODES = ["cbr", "vbr"]
+VIDEO_STREAMING_BASE_SETTINGS = {
+    "codec": "h265",
+    "resolution": "1920x1080",
+    "framerate": "30",
+    "quality": "veryHigh"
+}
 
 # ===========================================================
 # 📝 테스트 데이터
