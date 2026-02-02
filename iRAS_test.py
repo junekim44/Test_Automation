@@ -255,41 +255,59 @@ class IRASController:
             return False
         return False
     
-    def wait_for_video_attachment(self, timeout=None):
+    def wait_for_video_attachment(self, timeout=None, max_retries=3):
         """
-        스킵 가능한 대기 모드
+        스킵 가능한 대기 모드 (재시도 지원)
         - 지정된 시간(timeout) 동안 대기
         - 키보드 'Enter' 키를 누르면 즉시 남은 시간을 건너뛰고 진행
+        - 타임아웃 시 자동 재시도 (최대 max_retries회)
         """
         timeout = timeout or TIMEOUTS["video_connection"]
-        print(f"   ⏳ [iRAS] 영상 연결 대기 중... ({timeout}초)")
-        print(f"   💡 (Tip: 영상이 이미 나왔다면 'Enter'를 눌러 즉시 건너뛸 수 있습니다)")
         
-        # 입력 버퍼 비우기 (이전 입력이 남아있어서 바로 스킵되는 것 방지)
-        while msvcrt.kbhit():
-            msvcrt.getch()
-
-        for i in range(timeout):
-            # 1. 키보드 입력 감지 (Windows 전용)
-            if msvcrt.kbhit():
-                key = msvcrt.getch()
-                # 엔터(Enter) 키 코드 = b'\r'
-                if key == b'\r':
-                    print(f"\n   ⏩ [Skip] 사용자 입력으로 대기 시간을 건너뜁니다!")
-                    break
-
-            # 2. 1초 대기
-            time.sleep(1)
-            remaining = timeout - i
+        for attempt in range(1, max_retries + 1):
+            if attempt > 1:
+                print(f"\n   🔄 [iRAS] 영상 연결 재시도 ({attempt}/{max_retries})...")
+            else:
+                print(f"   ⏳ [iRAS] 영상 연결 대기 중... ({timeout}초)")
+            print(f"   💡 (Tip: 영상이 이미 나왔다면 'Enter'를 눌러 즉시 건너뛸 수 있습니다)")
             
-            # 3. 진행 상황 출력
-            if remaining % 10 == 0:
-                print(f"{remaining}s..", end=" ", flush=True)
-            elif remaining % 2 == 0:
-                print(".", end="", flush=True)
+            # 입력 버퍼 비우기 (이전 입력이 남아있어서 바로 스킵되는 것 방지)
+            while msvcrt.kbhit():
+                msvcrt.getch()
+
+            video_detected = False
+            for i in range(timeout):
+                # 1. 키보드 입력 감지 (Windows 전용)
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    # 엔터(Enter) 키 코드 = b'\r'
+                    if key == b'\r':
+                        print(f"\n   ⏩ [Skip] 사용자 입력으로 대기 시간을 건너뜁니다!")
+                        video_detected = True
+                        break
+
+                # 2. 1초 대기
+                time.sleep(1)
+                remaining = timeout - i
                 
-        print("\n   ✅ 대기 종료. (다음 단계 진행)")
-        return True
+                # 3. 진행 상황 출력
+                if remaining % 10 == 0:
+                    print(f"{remaining}s..", end=" ", flush=True)
+                elif remaining % 2 == 0:
+                    print(".", end="", flush=True)
+            
+            if video_detected:
+                print("\n   ✅ 영상 연결 확인됨!")
+                return True
+            else:
+                if attempt < max_retries:
+                    print(f"\n   ⚠️ 타임아웃 ({timeout}초 경과). 재시도 대기 중...")
+                    time.sleep(3)  # 재시도 전 짧은 대기
+                else:
+                    print(f"\n   ❌ 영상 연결 실패 (최대 재시도 횟수 초과)")
+                    return False
+                
+        return False
 
     def _handle_permission_action(self, coord_key, wait_time=None):
         """권한 테스트 액션 공통 처리"""
@@ -330,47 +348,16 @@ class IRASController:
 
         # 5. 클립 카피 (재생 -> 저장 -> 클립복사)
         if self._right_click_surveillance(main_hwnd):
-            print(f"   [Step 5] 재생 화면(Playback) 진입 시도...")
             self._click_relative(*IRAS_COORDS["menu_playback"])
+            time.sleep(IRAS_DELAYS["playback_load"])
             
-            wait_time = IRAS_DELAYS["playback_load"]
-            print(f"   [Wait] 재생창 로딩 대기 중... ({wait_time}초)")
-            time.sleep(wait_time)
-            
-            # 버튼 탐색 로그 추가
-            print(f"   🔍 [Debug] 버튼 탐색 시작 (AutomationId: {IRAS_IDS['save_clip_btn']})")
-            
-            try:
-                # UIA로 요소가 실제 존재하는지 먼저 확인
-                win = auto.ControlFromHandle(main_hwnd)
-                save_btn_element = win.Control(AutomationId=IRAS_IDS["save_clip_btn"])
-                
-                if save_btn_element.Exists(maxSearchSeconds=5):
-                    rect = save_btn_element.BoundingRectangle
-                    print(f"   ✅ [Found] 저장 버튼 발견! 위치: ({rect.left}, {rect.top}) ~ ({rect.right}, {rect.bottom})")
-                    
-                    # 실제 클릭 수행
-                    if self._click(main_hwnd, IRAS_IDS["save_clip_btn"]):
-                        print("   -> [Click] 저장 버튼 클릭 성공")
-                        time.sleep(IRAS_DELAYS["menu_navigate"])
-                        
-                        print(f"   -> [Action] 클립 복사 좌표 클릭 시도: {IRAS_COORDS['clip_copy']}")
-                        self._click_relative(*IRAS_COORDS["clip_copy"])
-                        
-                        time.sleep(IRAS_DELAYS["test_popup"])
-                        print("   -> [Pop-up] 결과 팝업 확인 엔터 전송")
-                        self.shell.SendKeys("{ENTER}")
-                        
-                        time.sleep(IRAS_DELAYS["permission_result"])
-                        self._return_to_watch()
-                    else:
-                        print("   ❌ [Fail] 저장 버튼 위치는 찾았으나 클릭 동작에 실패했습니다.")
-                else:
-                    print(f"   ❌ [Not Found] 재생 화면 내에 저장 버튼(ID: {IRAS_IDS['save_clip_btn']})이 존재하지 않습니다.")
-                    print("      💡 Tip: 재생창 로딩 시간이 더 필요하거나, 해당 계정의 재생 권한이 아예 없어 버튼이 안 보일 수 있습니다.")
-                    
-            except Exception as e:
-                print(f"   🔥 [Error] 버튼 확인 중 예외 발생: {e}")
+            if self._click(main_hwnd, IRAS_IDS["save_clip_btn"]):
+                time.sleep(IRAS_DELAYS["menu_navigate"])
+                self._click_relative(*IRAS_COORDS["clip_copy"])
+                time.sleep(IRAS_DELAYS["test_popup"])
+                self.shell.SendKeys("{ENTER}")
+                time.sleep(IRAS_DELAYS["permission_result"])
+                self._return_to_watch()
             
         print("   ✅ Phase 1 완료")
         return True
@@ -631,7 +618,7 @@ class IRASController:
         except: 
             pass
 
-        # IP 입력 로직
+        # IP 입력 로직 (개선: 한 글자씩 입력하여 "0" 누락 방지)
         ip_parts = target_ip.split('.')
         print(f"   [iRAS] IP 필드 입력: {ip_parts}")
         
@@ -642,9 +629,19 @@ class IRASController:
                 if edit.Exists(maxSearchSeconds=1):
                     edit.Click()
                     time.sleep(IRAS_DELAYS["input"])
-                    self.shell.SendKeys("^a{BACKSPACE}")
+                    
+                    # 전체 선택 및 삭제
+                    self.shell.SendKeys("^a")
+                    time.sleep(IRAS_DELAYS["key"])
+                    self.shell.SendKeys("{BACKSPACE}")
                     time.sleep(IRAS_DELAYS["input"])
-                    self.shell.SendKeys(str(part))
+                    
+                    # 🔥 핵심 수정: 한 글자씩 입력하여 "0" 누락 방지
+                    part_str = str(part)
+                    for char in part_str:
+                        self.shell.SendKeys(char)
+                        time.sleep(IRAS_DELAYS["key"] * 0.5)  # 각 글자 입력 간 짧은 대기
+                    
                     time.sleep(IRAS_DELAYS["click"])
                     self.shell.SendKeys("{TAB}")
                     time.sleep(IRAS_DELAYS["input"])
@@ -880,10 +877,10 @@ def run_port_change_process(device_name, target_port, target_ip="10.0.131.104"):
         print(f"   🔥 [iRAS Error] 프로세스 중 오류: {e}")
         return False
 
-def wait_for_connection(timeout=None):
-    """영상 연결 대기 함수"""
+def wait_for_connection(timeout=None, max_retries=3):
+    """영상 연결 대기 함수 (재시도 지원)"""
     controller = IRASController()
-    return controller.wait_for_video_attachment(timeout=timeout)
+    return controller.wait_for_video_attachment(timeout=timeout, max_retries=max_retries)
 
 def run_restore_ip_process(device_name, ip_address):
     """
