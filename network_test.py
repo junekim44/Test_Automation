@@ -788,144 +788,6 @@ def run_integrated_network_test(args):
         if current_test_ip:
             print("\n>>> [Step 12] 대역폭 제한 테스트")
             api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-            api.set_bandwidth_limit(True, 102400) # Reset
-            base_ips = iRAS_test.IRASController().get_current_ips()
-            
-            if api.set_bandwidth_limit(True, 1024):
-                time.sleep(15)
-                limit_ips = iRAS_test.IRASController().get_current_ips()
-                if limit_ips < base_ips * 0.5: print(f"🎉 [Pass] 제한 확인 ({base_ips}->{limit_ips})")
-            api.set_bandwidth_limit(True, 102400) # Restore
-
-        # [Step 13] IP 필터링
-        if current_test_ip:
-            print("\n>>> [Step 13] IP 필터링 테스트")
-            my_ip = get_local_ip()
-            api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-            
-            if api.set_ip_filter("deny", deny_list=my_ip):
-                time.sleep(5)
-                try:
-                    requests.get(f"http://{current_test_ip}:{ctx['PORT']}", timeout=3)
-                    print("❌ [Fail] 접속됨")
-                except: print("🎉 [Pass] 접속 차단됨")
-                
-                # 복구
-                NetworkManager.set_static_ip("10.0.131.200", config.PC_SUBNET, config.PC_GW)
-                if NetworkManager.ping(current_test_ip):
-                    CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"]).set_ip_filter("off")
-                NetworkManager.set_static_ip(config.PC_STATIC_IP, config.PC_SUBNET, config.PC_GW)
-
-        # [Step 14] SSL
-        if current_test_ip:
-            print("\n>>> [Step 14] SSL 모드 검증")
-            api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-            for mode, expected in [("standard", "ExcludeMultimedia"), ("high", "PartiallyMultimedia"), ("veryHigh", "FullPacket")]:
-                if api.set_ssl(True, mode):
-                    time.sleep(20)
-                    status = iRAS_test.IRASController().get_current_ssl_info()
-                    if status and expected.lower() in status.lower().replace(" ", ""):
-                        print(f"🎉 [Pass] {mode}")
-            api.set_ssl(False)
-
-        return True, "All Tests Completed"
-
-    except Exception as e:
-        return False, str(e)
-
-def run_from_port_test(args):
-    """
-    포트 변경 테스트(Step 11) 이후부터만 실행
-    - Step 11: 포트 변경 테스트
-    - Step 12: 대역폭 제한 테스트
-    - Step 13: IP 필터링 테스트
-    - Step 14: SSL 모드 검증
-    
-    전제 조건: 카메라가 고정 IP로 설정되어 있고 접속 가능한 상태여야 함
-    """
-    if not ctypes.windll.shell32.IsUserAnAdmin():
-        return False, "관리자 권한이 필요합니다."
-
-    # Context 초기화
-    ctx = {
-        "CAM_IP": args.ip or config.CAMERA_IP,
-        "PORT": "80",  # 초기 포트는 80
-        "ID": args.id or config.USERNAME,
-        "PW": args.pw or config.PASSWORD,
-        "IFACE": args.iface or config.INTERFACE_NAME,
-        "FEN_SVR": config.FEN_SERVER,
-        "FEN_NAME": config.FEN_NAME
-    }
-    config.INTERFACE_NAME = ctx["IFACE"]
-
-    print("\n=== 🚀 포트 변경 테스트 이후 실행 (Step 11-14) ===")
-    print(f"   타겟 카메라: {ctx['CAM_IP']}:{ctx['PORT']}")
-    
-    current_test_ip = ctx["CAM_IP"]
-    
-    try:
-        # 카메라 연결 확인
-        if not NetworkManager.ping(current_test_ip, timeout=5):
-            return False, f"카메라({current_test_ip}) 연결 실패. 먼저 카메라가 접속 가능한지 확인하세요."
-
-        # # [Step 11] 포트 변경 테스트 (수정됨)
-        # current_test_ip = config.CAMERA_IP
-        # if current_test_ip:
-        #     print("\n>>> [Step 11] 포트 변경 테스트 (HTTP:8080, Remote:9200)")
-            
-        #     if not NetworkManager.ping(current_test_ip, timeout=5):
-        #         print(f"   ⚠️ 카메라({current_test_ip}) 연결 실패. Step 11 스킵")
-        #     else:
-        #         api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-                
-        #         try:
-        #                 # [1] 포트 변경: HTTP 80->8080, Remote 8016->9200
-        #             print(f"   [1] 포트 변경 API (HTTP: 80 -> 8080, Remote: 8016 -> 9200)...")
-        #             if api.set_ports_api(web_port="8080", remote_port="9200"):
-        #                 ctx["PORT"] = "8080"
-        #                 print("   ✅ 포트 변경 성공")
-        #                 time.sleep(3)
-                        
-        #                 # [2] 웹 접속 확인: IP:8080/setup/setup.html
-        #                 print(f"\n   [2] 웹 접속 확인 (http://{current_test_ip}:8080/setup/setup.html)...")
-        #                 if _run_web_action(_action_verify_web_access, ctx, "8080"):
-        #                     print("   ✅ 웹 접속 확인 완료")
-        #                 else:
-        #                     print("   ⚠️ 웹 접속 실패")
-                        
-        #                 # [3] iRAS 9200포트 검색 및 확인
-        #                 print(f"\n   [3] iRAS 9200포트 검색...")
-        #                 if iRAS_test.run_port_change_process(config.IRAS_DEVICE_NAME, "9200", current_test_ip):
-        #                     print("   ✅ iRAS 9200포트 검색 확인 완료")
-        #                 else:
-        #                     print("   ⚠️ iRAS 설정 변경 실패")
-                        
-        #                 # [4] 포트 복구: HTTP 80, Remote 8016
-        #                 print(f"\n   [4] 포트 복구 (HTTP: 80, Remote: 8016)...")
-        #                 recovery_api = CameraApi(current_test_ip, "8080", ctx["ID"], ctx["PW"])
-        #                 if recovery_api.reset_ports_default():
-        #                     print("   ✅ 포트 복구 완료")
-        #                     ctx["PORT"] = "80"
-        #                     time.sleep(3)
-                            
-        #                     # [5] Live 화면 연결 확인
-        #                     print(f"\n   [5] Live 화면 연결 확인...")
-        #                     if iRAS_test.wait_for_connection(timeout=30):
-        #                         print("   ✅ Live 화면 연결 확인 완료")
-        #                     else:
-        #                         print("   ⚠️ Live 화면 연결 실패")
-        #                 else:
-        #                     print("   ❌ 포트 복구 실패")
-        #             else:
-        #                 print("   ❌ 포트 변경 API 실패")
-                        
-        #         except Exception as e:
-        #             print(f"   🔥 포트 변경 테스트 중 오류: {e}")
-
-        # [Step 12] 대역폭
-        if current_test_ip:
-            print("\n>>> [Step 12] 대역폭 제한 테스트")
-            api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
             
             # 1. 초기화: 확실한 비교를 위해 먼저 제한을 풉니다.
             api.set_bandwidth_limit(True, 102400) 
@@ -999,6 +861,7 @@ def run_from_port_test(args):
     except Exception as e:
         return False, str(e)
 
+
 if __name__ == "__main__":
     if not ctypes.windll.shell32.IsUserAnAdmin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
@@ -1011,7 +874,3 @@ if __name__ == "__main__":
     parser.add_argument('--iface', default=None)
     parser.add_argument('--from-port', action='store_true', help='포트 변경 테스트(Step 11) 이후부터만 실행')
     args = parser.parse_args()
-
-    success, msg = run_from_port_test(args)
-    print(f"\nResult: {'✅ Success' if success else '❌ Failure'} ({msg})")
-    input("End. Press Enter...")
