@@ -109,8 +109,7 @@ IRAS_DELAYS = {
 
 # iRAS 감시 화면 클릭 오프셋
 IRAS_SURVEILLANCE_OFFSETS = {
-    "right_click_top": 20,         # 우클릭 상단 오프셋
-    "right_click_mid": 50,          # 우클릭 중간 오프셋
+    "right_click_top": 15,         # 우클릭 상단 오프셋         # 우클릭 중간 오프셋
     "device_list": 25,             # 장치 리스트 클릭 오프셋
 }
 
