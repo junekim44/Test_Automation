@@ -103,8 +103,8 @@ class IRASController:
             return False
 
     def _copy_debug_info(self, hwnd, y_offset=None):
-        """감시 화면에서 디버그 정보 복사 (우클릭 + C)"""
-        offset = y_offset or IRAS_SURVEILLANCE_OFFSETS["right_click_mid"]
+        """감시 화면에서 디버그 정보 복사 (우클릭 + 마우스 이동 + C)"""
+        offset = y_offset or IRAS_SURVEILLANCE_OFFSETS["right_click_top"] 
         if self._click(hwnd, IRAS_IDS["surveillance_pane"], right_click=True, y_offset=offset):
             time.sleep(IRAS_DELAYS["menu_navigate"])
             self._send_key(IRAS_KEYS["c"])
@@ -518,15 +518,33 @@ class IRASController:
             return -1
         
         self._clear_clipboard()
-        if not self._copy_debug_info(main_hwnd, IRAS_SURVEILLANCE_OFFSETS["right_click_mid"]):
+        if not self._copy_debug_info(main_hwnd, IRAS_SURVEILLANCE_OFFSETS["right_click_top"]):
             return -1
             
         print("   -> 디버그 정보 복사 완료. 데이터 파싱 중...")
         
         try:
             win32clipboard.OpenClipboard()
-            content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
+            try:
+                # 먼저 클립보드에 텍스트 형식이 있는지 확인
+                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                    content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                elif win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_TEXT):
+                    # CF_UNICODETEXT가 없으면 CF_TEXT 시도
+                    content = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT).decode('utf-8', errors='ignore')
+                else:
+                    print("   ⚠️ 클립보드에 텍스트 형식이 없습니다.")
+                    win32clipboard.CloseClipboard()
+                    return -1
+            except Exception as e:
+                print(f"   ⚠️ 클립보드 데이터 읽기 실패: {e}")
+                win32clipboard.CloseClipboard()
+                return -1
+            finally:
+                try:
+                    win32clipboard.CloseClipboard()
+                except:
+                    pass
             
             match = re.search(r'Ips\s+([\d\.]+)', content, re.IGNORECASE)
             if match:
@@ -552,15 +570,34 @@ class IRASController:
             return None
         
         self._clear_clipboard()
-        if not self._copy_debug_info(main_hwnd, IRAS_SURVEILLANCE_OFFSETS["right_click_mid"]):
+        # right_click_top 사용 (config에서 값 수정 가능)
+        if not self._copy_debug_info(main_hwnd, IRAS_SURVEILLANCE_OFFSETS["right_click_top"]):
             return None
             
         print("   -> 디버그 정보 복사 완료. 데이터 파싱 중...")
         
         try:
             win32clipboard.OpenClipboard()
-            content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
+            try:
+                # 먼저 클립보드에 텍스트 형식이 있는지 확인
+                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                    content = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                elif win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_TEXT):
+                    # CF_UNICODETEXT가 없으면 CF_TEXT 시도
+                    content = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT).decode('utf-8', errors='ignore')
+                else:
+                    print("   ⚠️ 클립보드에 텍스트 형식이 없습니다.")
+                    win32clipboard.CloseClipboard()
+                    return None
+            except Exception as e:
+                print(f"   ⚠️ 클립보드 데이터 읽기 실패: {e}")
+                win32clipboard.CloseClipboard()
+                return None
+            finally:
+                try:
+                    win32clipboard.CloseClipboard()
+                except:
+                    pass
             
             match = re.search(r'Ssl\s+-\s+(.+)', content, re.IGNORECASE)
             if match:
