@@ -211,6 +211,35 @@ VIDEO_STREAMING_BASE_SETTINGS = {
     "quality": "veryHigh"
 }
 
+# 8. MAT (Motion Adaptive Transmission) Test
+VIDEO_MAT_SENSITIVITY = "3"  # 민감도 (1~5)
+VIDEO_MAT_INACTIVITY_PERIOD = "10"  # 비활성 감지 시간 (초, 1~60)
+VIDEO_MAT_TARGET_FRAMERATE = "5"  # 비활성 시 목표 프레임레이트 (1~15)
+VIDEO_MAT_TARGET_IPS = 5.0  # 검증용 목표 IPS 값
+VIDEO_MAT_WAIT_TIME = 20  # IPS 감소 대기 시간 (초)
+
+# 9. Privacy Mask Test
+VIDEO_PRIVACY_ZONE_COUNT = 8  # 테스트할 Zone 개수 (최대 8 또는 16, 카메라 그룹별 다름)
+VIDEO_PRIVACY_GRID_COLS = 4  # 그리드 열 개수 (2x4 그리드)
+VIDEO_PRIVACY_GRID_ROWS = 2  # 그리드 행 개수 (2x4 그리드)
+VIDEO_PRIVACY_ZONE_NAME_PREFIX = "TestZone"  # Zone 이름 접두사
+
+# 10. OSD (On-Screen Display) Test
+# OSD Text
+VIDEO_OSD_TEXT_STRING = "IDIS Camera Test 12345"  # 표시할 텍스트
+VIDEO_OSD_TEXT_SIZES = ["0", "2", "4"]  # 테스트할 텍스트 크기 (0=최소, 4=최대)
+VIDEO_OSD_TEXT_COLORS = ["ffffff", "ff0000", "00ff00"]  # 테스트할 색상 (흰색, 빨강, 초록)
+VIDEO_OSD_TEXT_TRANSPARENCIES = ["255", "145", "40"]  # 투명도 (255=불투명, 40=투명)
+VIDEO_OSD_TEXT_POSITION = {"x": "50", "y": "10"}  # 기본 위치 (중앙 상단)
+
+# OSD DateTime
+VIDEO_OSD_DATETIME_DATE_FORMATS = ["YYYY/MM/DD", "MM/DD/YYYY", "DD/MM/YYYY"]  # 날짜 형식
+VIDEO_OSD_DATETIME_TIME_FORMATS = ["HH:MM:SS", "II:MM:SS_PP", "PP_II:MM:SS"]  # 시간 형식
+VIDEO_OSD_DATETIME_TEXT_SIZE = "2"  # DateTime 텍스트 크기
+VIDEO_OSD_DATETIME_TEXT_COLOR = "ffffff"  # DateTime 텍스트 색상
+VIDEO_OSD_DATETIME_TEXT_TRANSPARENCY = "255"  # DateTime 투명도
+VIDEO_OSD_DATETIME_POSITION = {"x": "5", "y": "5"}  # DateTime 위치 (좌상단)
+
 # ===========================================================
 # 📝 테스트 데이터
 # ===========================================================
