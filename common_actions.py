@@ -7,7 +7,13 @@ DIALOG_BUTTONS = '.ui-dialog-buttonset button'
 
 def parse_api_response(response_text: str) -> dict:
     """API 응답(Query String)을 딕셔너리로 변환"""
-    return dict(parse_qsl(response_text))
+    if not response_text or not response_text.strip():
+        return {}
+    try:
+        return dict(parse_qsl(response_text))
+    except Exception as e:
+        # 파싱 실패 시 빈 딕셔너리 반환
+        return {}
 
 def handle_popup(page: Page, button_index=0, timeout=5000):
     """
