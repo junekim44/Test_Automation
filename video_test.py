@@ -126,8 +126,15 @@ def trigger_iras_snapshot(page: Page, camera_ip: str, file_name=None):
 # ⚙️ [API] 공통 제어 함수 (GET/SET)
 # ===========================================================
 
-def _api_get(page, ip, action):
+def _api_get(page, ip, action, channel=None):
+    """
+    API GET 요청
+    channel: videoPrivacy 같은 일부 API는 channel 파라미터 필요 (예: channel=1)
+    """
     api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action={action}&mode=1"
+    if channel is not None:
+        api_url += f"&channel={channel}"
+    
     try:
         response_text = page.evaluate("""async (url) => {
             try {
@@ -148,9 +155,16 @@ def _api_get(page, ip, action):
         print(f"   🔥 [API GET Exception] action={action}, 오류: {e}")
         return None
 
-def _api_set(page, ip, action, params):
+def _api_set(page, ip, action, params, channel=None):
+    """
+    API SET 요청
+    channel: videoPrivacy 같은 일부 API는 channel 파라미터 필요 (예: channel=1)
+    """
     query_str = "&".join([f"{k}={v}" for k, v in params.items()])
-    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action={action}&mode=0&{query_str}"
+    api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action={action}&mode=0"
+    if channel is not None:
+        api_url += f"&channel={channel}"
+    api_url += f"&{query_str}"
     
     try:
         response_text = page.evaluate("""async (url) => {
@@ -196,8 +210,13 @@ def api_set_video_streaming(page, ip, p): return _api_set(page, ip, "videoStream
 def api_get_video_mat(page, ip): return _api_get(page, ip, "videoMat")
 def api_set_video_mat(page, ip, p): return _api_set(page, ip, "videoMat", p)
 
-def api_get_video_privacy(page, ip): return _api_get(page, ip, "videoPrivacy")
-def api_set_video_privacy(page, ip, p): return _api_set(page, ip, "videoPrivacy", p)
+def api_get_video_privacy(page, ip, channel=1): 
+    """videoPrivacy API GET - channel 파라미터 사용 (기본값: 1)"""
+    return _api_get(page, ip, "videoPrivacy", channel=channel)
+
+def api_set_video_privacy(page, ip, p, channel=1): 
+    """videoPrivacy API SET - channel 파라미터 사용 (기본값: 1)"""
+    return _api_set(page, ip, "videoPrivacy", p, channel=channel)
 
 def api_get_video_osd_text(page, ip): return _api_get(page, ip, "videoOsdText")
 def api_set_video_osd_text(page, ip, p): return _api_set(page, ip, "videoOsdText", p)
@@ -1593,7 +1612,15 @@ def run_osd_test(page: Page, camera_ip: str):
     
     if api_set_video_osd_text(page, camera_ip, payload):
         time.sleep(2)
-        print(f"   ✅ OSD Text Off 확인")
+        trigger_iras_snapshot(page, camera_ip, "OSD_Text_Off.png")
+        
+        # API로 실제 적용 확인
+        curr = api_get_video_osd_text(page, camera_ip)
+        if curr and curr.get('useOsd') == 'off':
+            print(f"   ✅ OSD Text Off 확인 (API 검증 완료)")
+        else:
+            print(f"   ❌ OSD Text Off 검증 실패 (API 값: {curr.get('useOsd') if curr else 'None'})")
+            failed_count += 1
     else:
         print(f"   ❌ 설정 실패")
         failed_count += 1
@@ -1613,6 +1640,16 @@ def run_osd_test(page: Page, camera_ip: str):
     payload['positionY'] = VIDEO_OSD_TEXT_POSITION['y']
     
     if api_set_video_osd_text(page, camera_ip, payload):
+        # API로 실제 적용 확인
+        curr = api_get_video_osd_text(page, camera_ip)
+        if curr and curr.get('useOsd') == 'on':
+            print(f"   ✅ OSD Text On 확인 (API 검증 완료)")
+            print(f"   📝 설정된 텍스트: '{curr.get('text')}'")
+        else:
+            print(f"   ❌ OSD Text On 검증 실패 (API 값: {curr.get('useOsd') if curr else 'None'})")
+            failed_count += 1
+        
+        # 스냅샷 촬영
         print(f"   ⏳ 영상 확인 ({VIDEO_WAIT_TIME}s)...")
         time.sleep(VIDEO_WAIT_TIME)
         trigger_iras_snapshot(page, camera_ip, "OSD_Text_On.png")
@@ -1675,7 +1712,13 @@ def run_osd_test(page: Page, camera_ip: str):
         if 'returnCode' in payload: del payload['returnCode']
         payload['useOsd'] = 'off'
         if api_set_video_osd_text(page, camera_ip, payload):
-            print("   ✅ 설정 복구 완료")
+            time.sleep(2)
+            # 복구 검증
+            verify = api_get_video_osd_text(page, camera_ip)
+            if verify and verify.get('useOsd') == 'off':
+                print("   ✅ 설정 복구 완료 (API 검증 완료)")
+            else:
+                print(f"   ⚠️ 설정 복구 검증 실패 (API 값: {verify.get('useOsd') if verify else 'None'})")
         else:
             print("   ⚠️ 설정 복구 실패")
 
@@ -1702,7 +1745,15 @@ def run_osd_test(page: Page, camera_ip: str):
     
     if api_set_video_osd_datetime(page, camera_ip, payload):
         time.sleep(2)
-        print(f"   ✅ OSD DateTime Off 확인")
+        trigger_iras_snapshot(page, camera_ip, "OSD_DateTime_Off.png")
+        
+        # API로 실제 적용 확인
+        curr = api_get_video_osd_datetime(page, camera_ip)
+        if curr and curr.get('useOsd') == 'off':
+            print(f"   ✅ OSD DateTime Off 확인 (API 검증 완료)")
+        else:
+            print(f"   ❌ OSD DateTime Off 검증 실패 (API 값: {curr.get('useOsd') if curr else 'None'})")
+            failed_count += 1
     else:
         print(f"   ❌ 설정 실패")
         failed_count += 1
@@ -1723,6 +1774,16 @@ def run_osd_test(page: Page, camera_ip: str):
     payload['positionY'] = VIDEO_OSD_DATETIME_POSITION['y']
     
     if api_set_video_osd_datetime(page, camera_ip, payload):
+        # API로 실제 적용 확인
+        curr = api_get_video_osd_datetime(page, camera_ip)
+        if curr and curr.get('useOsd') == 'on':
+            print(f"   ✅ OSD DateTime On 확인 (API 검증 완료)")
+            print(f"   📝 날짜형식: {curr.get('dateFormat')}, 시간형식: {curr.get('timeFormat')}")
+        else:
+            print(f"   ❌ OSD DateTime On 검증 실패 (API 값: {curr.get('useOsd') if curr else 'None'})")
+            failed_count += 1
+        
+        # 스냅샷 촬영
         print(f"   ⏳ 영상 확인 ({VIDEO_WAIT_TIME}s)...")
         time.sleep(VIDEO_WAIT_TIME)
         trigger_iras_snapshot(page, camera_ip, "OSD_DateTime_On.png")
@@ -1770,7 +1831,13 @@ def run_osd_test(page: Page, camera_ip: str):
         if 'returnCode' in payload: del payload['returnCode']
         payload['useOsd'] = 'off'
         if api_set_video_osd_datetime(page, camera_ip, payload):
-            print("   ✅ 설정 복구 완료")
+            time.sleep(2)
+            # 복구 검증
+            verify = api_get_video_osd_datetime(page, camera_ip)
+            if verify and verify.get('useOsd') == 'off':
+                print("   ✅ 설정 복구 완료 (API 검증 완료)")
+            else:
+                print(f"   ⚠️ 설정 복구 검증 실패 (API 값: {verify.get('useOsd') if verify else 'None'})")
         else:
             print("   ⚠️ 설정 복구 실패")
 
