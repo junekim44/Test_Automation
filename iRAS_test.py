@@ -184,6 +184,36 @@ class IRASController:
         offset = offset or IRAS_SURVEILLANCE_OFFSETS["right_click_top"]
         return self._click(main_hwnd, IRAS_IDS["surveillance_pane"], right_click=True, y_offset=offset)
 
+    def switch_stream(self, stream_number):
+        """
+        iRAS 화면에서 우클릭 메뉴를 통해 스트림을 전환합니다.
+        stream_number: 1, 2, 3, 4
+        """
+        try:
+            main_hwnd = self._get_handle(IRAS_TITLES["main"], force_focus=True, use_alt=False)
+            if not main_hwnd:
+                print(f"   ⚠️ iRAS 메인 창을 찾을 수 없습니다.")
+                return False
+            
+            # 감시 화면 우클릭
+            if not self._right_click_surveillance(main_hwnd):
+                print(f"   ⚠️ 감시 화면 우클릭 실패")
+                return False
+            
+            # multi_stream 메뉴 항목으로 이동 후 클릭
+            self._click_relative(*IRAS_COORDS["multi_stream"])
+            time.sleep(IRAS_DELAYS["menu_navigate"])
+            
+            # 스트림 선택
+            stream_key = f"multi_stream_{stream_number}"
+            self._click_relative(*IRAS_COORDS[stream_key])
+            time.sleep(IRAS_DELAYS["window_open"])  # 스트림 전환 대기
+            
+            return True
+        except Exception as e:
+            print(f"   ⚠️ 스트림 전환 실패: {e}")
+            return False
+
     def _close_window(self, hwnd, auto_id=None):
         """창 닫기 (확인 버튼 클릭)"""
         if auto_id:
