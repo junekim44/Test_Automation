@@ -6,7 +6,7 @@
 # ===========================================================
 # 📋 카메라 기본 설정
 # ===========================================================
-CAMERA_IP = "10.0.131.112"
+CAMERA_IP = "10.0.131.104"
 CAMERA_PORT = "80"
 CAMERA_URL = f"http://{CAMERA_IP}/setup"
 USERNAME = "admin"
@@ -31,7 +31,7 @@ SCAN_AUTO_NET = "169.254.0.0/16"
 # ===========================================================
 # 🖥️ iRAS 설정
 # ===========================================================
-IRAS_DEVICE_NAME = "112_Y8D11"  # iRAS 테스트용 장치 이름
+IRAS_DEVICE_NAME = "104_T6631"  # iRAS 테스트용 장치 이름
 
 # iRAS 창 제목
 IRAS_TITLES = {
@@ -71,6 +71,11 @@ IRAS_COORDS = {
     "menu_ptz": (50, 175),          # PTZ 제어
     "menu_color": (50, 225),        # 컬러 제어
     "menu_alarm": (50, 300),        # 알람 출력 제어
+    "multi_stream": (50, 500),      # 멀티 스트림 제어
+    "multi_stream_1": (150, 25),    # 멀티 스트림 1 제어
+    "multi_stream_2": (150, 50),    # 멀티 스트림 2 제어
+    "multi_stream_3": (150, 75),    # 멀티 스트림 3 제어
+    "multi_stream_4": (150, 100),    # 멀티 스트림 4 제어    
     "alarm_on": (150, 0),           # 알람 > 켜기 (상대좌표)
     "clip_copy": (30, 0),           # 클립 복사 메뉴
 }
@@ -175,8 +180,15 @@ VIDEO_PIVOT_OPTS = ["off", "clockwise", "counterclockwise"]
 VIDEO_WB_MODES = {
     "auto": "Auto",
     "incandescent": "Incandescent",
+    "4000k": "4000K",
+    "5000k": "5000K",
+    "sunny": "Sunny",
+    "cloudy": "Cloudy",
+    "flash": "Flash",
     "fluorescent_warm": "Fluorescent Warm",
-    "manual": "Manual"
+    "fluorescent_cold": "Fluorescent Cold",
+    "manual": "Manual",
+    "hold": "Hold"
 }
 VIDEO_WB_GAIN_TEST_VALUES = ["10", "500"]
 
