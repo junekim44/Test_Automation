@@ -4,34 +4,60 @@
 """
 
 # ===========================================================
-# 📋 카메라 기본 설정
+# 📋 카메라 기본 설정 (실행 시 동적으로 설정됨)
 # ===========================================================
-CAMERA_IP = "10.0.131.104"
+CAMERA_IP = None
 CAMERA_PORT = "80"
-CAMERA_URL = f"http://{CAMERA_IP}/setup"
-USERNAME = "admin"
-PASSWORD = "qwerty0-"
+CAMERA_URL = None
+USERNAME = None
+PASSWORD = None
 
 # ===========================================================
-# 🌐 네트워크 설정
+# 🌐 네트워크 설정 (실행 시 동적으로 설정됨)
 # ===========================================================
-INTERFACE_NAME = "이더넷"  # 본인 PC 환경에 맞게 수정 (예: "Ethernet" or "Wi-Fi")
+INTERFACE_NAME = None
 
 # PC 네트워크 설정
-PC_STATIC_IP = "10.0.131.102"
+PC_STATIC_IP = None
 PC_SUBNET = "255.255.0.0"
 PC_GW = "10.0.0.1"
 PC_AUTO_IP = "169.254.100.100"
 AUTO_SUBNET = "255.255.0.0"
 
 # 스캔 범위
-SCAN_NET = "10.0.131.0/24"
+SCAN_NET = None
 SCAN_AUTO_NET = "169.254.0.0/16"
 
 # ===========================================================
-# 🖥️ iRAS 설정
+# 🖥️ iRAS 설정 (실행 시 동적으로 설정됨)
 # ===========================================================
-IRAS_DEVICE_NAME = "104_T6631"  # iRAS 테스트용 장치 이름
+IRAS_DEVICE_NAME = None
+
+# ===========================================================
+# 🔧 설정 동적 업데이트 함수
+# ===========================================================
+def update_config(camera_ip, username, password, interface_name, iras_device_name, pc_static_ip):
+    """사용자 입력값으로 전역 설정을 업데이트합니다."""
+    global CAMERA_IP, CAMERA_URL, USERNAME, PASSWORD
+    global INTERFACE_NAME, IRAS_DEVICE_NAME, PC_STATIC_IP, SCAN_NET, FEN_NAME
+    
+    CAMERA_IP = camera_ip
+    CAMERA_URL = f"http://{camera_ip}/setup"
+    USERNAME = username
+    PASSWORD = password
+    INTERFACE_NAME = interface_name
+    IRAS_DEVICE_NAME = iras_device_name
+    PC_STATIC_IP = pc_static_ip
+    
+    # 스캔 범위 자동 생성 (카메라 IP 기반)
+    ip_parts = camera_ip.split('.')
+    if len(ip_parts) == 4:
+        SCAN_NET = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"
+    else:
+        SCAN_NET = "10.0.131.0/24"  # 기본값
+    
+    # FEN 이름도 IRAS 장치 이름과 동일하게 설정
+    FEN_NAME = iras_device_name
 
 # iRAS 창 제목
 IRAS_TITLES = {
@@ -129,7 +155,7 @@ IRAS_KEYS = {
 # 🌍 FEN 설정
 # ===========================================================
 FEN_SERVER = "qa1.idis.co.kr"
-FEN_NAME = IRAS_DEVICE_NAME
+FEN_NAME = None  # 실행 시 IRAS_DEVICE_NAME과 동일하게 설정됨
 FEN_PORT = "10088"
 
 # ===========================================================
