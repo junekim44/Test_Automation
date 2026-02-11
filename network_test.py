@@ -93,9 +93,6 @@ class NetworkManager:
         return False
 
 # =========================================================
-# 🔍 [Scanner] 네트워크 장치 탐색 (최적화 버전)
-# =========================================================
-# =========================================================
 # 🔍 [Scanner] 네트워크 장치 탐색
 # =========================================================
 class CameraScanner:
@@ -177,7 +174,8 @@ class CameraScanner:
 
     @staticmethod
     def find_ip_combined(target_mac, scan_range, timeout=40):
-        print(f"🔍 [Scanner] MAC({target_mac}) 탐색 시작 ({scan_range})...", end="", flush=True)
+        """MAC 주소로 IP 탐색 (ARP Cache, ONVIF, Sniffing)"""
+        print(f"   🔍 MAC 주소 탐색 중 ({target_mac})...", end="", flush=True)
         target_mac = CameraScanner.normalize_mac(target_mac)
         target_mac_dash = target_mac.replace(":", "-")
         is_link_local = "169.254" in scan_range
@@ -204,7 +202,7 @@ class CameraScanner:
                                 continue
                             
                             if subprocess.call(f"ping -n 1 -w 500 {ip}", shell=True, stdout=subprocess.DEVNULL) == 0:
-                                print(f" (ARP Cache) ✅ {ip}")
+                                print(f" 발견! ✅ {ip}")
                                 return ip
                 except: pass
             
@@ -213,19 +211,19 @@ class CameraScanner:
                 if found_ip and found_ip != "0.0.0.0":
                     if (is_link_local and found_ip.startswith("169.254")) or \
                        (not is_link_local and not found_ip.startswith("169.254")):
-                        print(f" (Sniffing) ✅ {found_ip}")
+                        print(f" 발견! ✅ {found_ip}")
                         return found_ip
             else:
                 CameraScanner.scan_onvif(timeout=1)
                 found_ip = CameraScanner.scan_arp(target_mac, scan_range, timeout=2)
                 if found_ip and found_ip != "0.0.0.0":
-                    print(f" (Active ARP) ✅ {found_ip}")
+                    print(f" 발견! ✅ {found_ip}")
                     return found_ip
             
             print(".", end="", flush=True)
             time.sleep(1)
         
-        print(" ❌ 실패")
+        print(" 실패 ❌")
         return None
     
 
@@ -254,17 +252,18 @@ class WebController:
         except: pass
 
     def get_mac_address(self):
-        print(f"🌐 [Web] MAC 주소 추출 시도: {self.ip}")
+        """카메라 Web UI에서 MAC 주소 추출"""
+        print(f"   🌐 Web UI 접속 ({self.ip}:{self.port})")
         try:
             self.page.goto(f"http://{self.ip}:{self.port}/setup/setup.html", timeout=10000)
             self.page.wait_for_selector("#Page200_id", timeout=5000)
             self._click_and_wait("#Page200_id")
             self._click_and_wait("#Page201_id")
             mac = self.page.input_value("#mac-addressInfo", timeout=3000).strip()
-            print(f"   ✅ MAC Found: {mac}")
+            print(f"   ✅ MAC 주소 추출 완료: {mac}")
             return mac
         except Exception as e:
-            print(f"   ⚠️ Web Error: {e}")
+            print(f"   ⚠️ Web 접속 실패: {e}")
             return None
 
 # =========================================================
@@ -303,20 +302,24 @@ class CameraApi:
             return False, str(e)
 
     def set_link_local_api(self, enable=True):
+        """Link-Local 설정"""
         val = "on" if enable else "off"
-        print(f"📡 [API] Link-Local 설정: {val}...", end="")
+        print(f"   📡 Link-Local 설정: {val}...", end="")
         current = self._get_config("networkIp")
-        if not current: return False
+        if not current:
+            print(" 실패 ❌")
+            return False
         
         current.update({"action": "networkIp", "mode": "0", "linkLocalOnly": val})
         if "returnCode" in current: del current["returnCode"]
         
         success, msg = self._post_config(current)
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
+        print(" 성공 ✅" if success else f" 실패 ❌")
         return success
 
     def set_fen_api(self, fen_name, fen_server):
-        print(f"📡 [API] FEN 설정 요청: {fen_name} ({fen_server})...", end="")
+        """FEN 설정 및 검증"""
+        print(f"   📡 FEN 설정: {fen_name} ({fen_server})")
         payload = {
             "action": "networkDDNS", "mode": "0", "useDDNS": "on",
             "serverAddress": fen_server, "port": str(config.FEN_PORT), 
@@ -324,33 +327,34 @@ class CameraApi:
         }
         success, msg = self._post_config(payload)
         if not success:
-            print(f" 설정 실패 ❌ (Code: {msg.strip()})")
+            print(f"   ❌ FEN 설정 실패")
             return False
             
         time.sleep(2)
-        print("   -> FEN 이름 유효성 검사...", end="")
         check_payload = payload.copy()
         check_payload["mode"] = "2"
         success, _ = self._post_config(check_payload)
-        print(" 확인 완료 ✅" if success else " 확인 실패 ❌")
+        print("   ✅ FEN 설정 완료" if success else "   ❌ FEN 검증 실패")
         return success
 
     def verify_fen_setting(self, expected_server):
+        """FEN 설정 검증"""
         data = self._get_config("networkDDNS")
         valid = (data.get("useDDNS") == "on" and data.get("serverAddress") == expected_server)
-        print(f"📡 [API] FEN 검증: {'Pass' if valid else 'Fail'}")
+        print(f"   📡 FEN 검증: {'✅ Pass' if valid else '❌ Fail'}")
         return valid
 
     def set_upnp_api(self, enable=True):
+        """UPNP 설정"""
         val = "on" if enable else "off"
-        print(f"📡 [API] UPNP 설정: {val}...", end="")
+        print(f"   📡 UPNP 설정: {val}...", end="")
         success, msg = self._post_config({"action": "networkPort", "mode": "0", "useUPNP": val})
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
+        print(" 성공 ✅" if success else " 실패 ❌")
         return success
 
     def set_ports_api(self, web_port=None, remote_port=None):
+        """포트 변경 및 검증"""
         current_ip = self.base_url.split("://")[1].split(":")[0]
-        print(f"📡 [API] 포트 변경 요청: Web={web_port}, Service={remote_port}...", end="")
         
         cfg = self._get_config("networkPort")
         target_web = str(web_port) if web_port else cfg.get("webPort", "80")
@@ -365,11 +369,10 @@ class CameraApi:
             "rtspPort": cfg.get("rtspPort", "554"), "recordPort": cfg.get("recordPort", "8017"),
         }
         
-        self._post_config(payload, timeout=3) # 끊김 허용
+        self._post_config(payload, timeout=3)
 
-        # 검증 (새 세션)
         verify_url = f"http://{current_ip}:{target_web}/cgi-bin/webSetup.cgi"
-        print(f"\n   -> 🔄 변경된 포트({target_web})로 검증 시도...", end="")
+        print(f"   🔄 변경된 포트({target_web})로 검증 중...", end="")
         
         new_session = requests.Session()
         new_session.auth = self.session.auth
@@ -379,7 +382,7 @@ class CameraApi:
                 time.sleep(1)
                 res = new_session.get(f"{verify_url}?action=networkPort&mode=1", timeout=2)
                 if res.status_code == 200 and f"webPort={target_web}" in res.text:
-                    print(" 성공 🎯")
+                    print(" 성공 ✅")
                     self.session = new_session
                     self.base_url = verify_url
                     return True
@@ -388,14 +391,12 @@ class CameraApi:
         return False
 
     def reset_ports_default(self):
-        print("🚑 [API] 포트 기본값 복구 요청...", end="")
+        """포트 기본값으로 복구 (HTTP:80, Remote:8016)"""
         current_ip = self.base_url.split("://")[1].split(":")[0]
-        current_port = self.base_url.split("://")[1].split(":")[1].split("/")[0] if ":" in self.base_url.split("://")[1] else "80"
         
-        # 현재 설정을 먼저 가져와서 필요한 값들 보존
         current_cfg = self._get_config("networkPort")
         if not current_cfg:
-            print(f" 실패 ❌ (현재 설정 조회 실패)")
+            print("   ❌ 현재 설정 조회 실패")
             return False
         
         payload = {
@@ -409,24 +410,11 @@ class CameraApi:
             "adminPort": "8016", "watchPort": "8016", "searchPort": "8016", "remotePort": "8016"
         }
         
-        # 포트 변경 요청 (타임아웃 증가)
-        success, msg = self._post_config(payload, timeout=10)
-        if not success:
-            print(f" 실패 ❌ ({msg.strip()})")
-            # 실패해도 검증 시도 (포트가 이미 80일 수도 있음)
-        else:
-            # 연결 끊김은 포트 변경 중 정상적인 현상
-            if "Connection closed" in msg or "Expected" in msg:
-                print(" 요청 완료 ")
-            else:
-                print(" 요청 완료")
-        
-        # 포트 변경 후 연결이 끊길 수 있으므로 대기
+        self._post_config(payload, timeout=10)
         time.sleep(8)
         
-        # 검증: 포트 80으로 접속 가능한지 확인
         verify_url = f"http://{current_ip}:80/cgi-bin/webSetup.cgi"
-        print(f"\n   -> 🔄 복구된 포트(80)로 검증 시도...", end="")
+        print(f"   🔄 복구된 포트(80)로 검증 중...", end="")
         
         new_session = requests.Session()
         new_session.auth = self.session.auth
@@ -436,57 +424,53 @@ class CameraApi:
                 time.sleep(1)
                 res = new_session.get(f"{verify_url}?action=networkPort&mode=1", timeout=3)
                 if res.status_code == 200:
-                    # webPort=80 확인
                     if "webPort=80" in res.text:
-                        print(" 성공 🎯")
+                        print(" 성공 ✅")
                         self.session = new_session
                         self.base_url = verify_url
                         return True
-                    # 이미 80이 아닐 수도 있으므로 현재 값 확인
                     elif "webPort=" in res.text:
                         match = re.search(r'webPort=(\d+)', res.text)
-                        if match:
-                            actual_port = match.group(1)
-                            if actual_port == "80":
-                                print(" 성공 🎯")
-                                self.session = new_session
-                                self.base_url = verify_url
-                                return True
-            except Exception as e:
-                if attempt < 5:  # 처음 5번만 출력
+                        if match and match.group(1) == "80":
+                            print(" 성공 ✅")
+                            self.session = new_session
+                            self.base_url = verify_url
+                            return True
+            except Exception:
+                if attempt < 5:
                     print(".", end="")
         
         print(" 실패 ❌")
         return False
 
     def set_bandwidth_limit(self, enable=True, limit_kbps=102400):
-        print(f"📡 [API] 대역폭 제한: {'ON' if enable else 'OFF'}...", end="")
+        """대역폭 제한 설정"""
         payload = {"action": "networkBandwidth", "mode": "0", 
                    "useNetworkBandwidth": "on" if enable else "off", "networkBandwidth": str(limit_kbps)}
         success, msg = self._post_config(payload)
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
         return success
 
     def set_ip_filter(self, mode="off", allow_list="", deny_list=""):
-        print(f"🛡️ [API] IP 필터: {mode}...", end="")
+        """IP 필터 설정"""
         payload = {"action": "networkSecurity", "mode": "0", "filterType": mode, 
                    "allowList": allow_list, "denyList": deny_list, "useSSL": "off"}
         success, msg = self._post_config(payload)
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
         return success
 
     def set_ssl(self, enable=True, ssl_type="standard"):
+        """SSL 설정"""
         val = "on" if enable else "off"
-        print(f"🔒 [API] SSL 설정: {val} ({ssl_type})...", end="")
         payload = {"action": "networkSecurity", "mode": "0", "useSSL": val, "sslType": ssl_type, "filterType": "off"}
         success, msg = self._post_config(payload)
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
         return success
 
     def set_ip_address_api(self, mode_type="manual", ip=None, gateway=None, subnet=None, link_local_off=False):
-        print(f"📡 [API] 네트워크 변경: {mode_type}...", end="")
+        """IP 주소 설정 (manual/dhcp)"""
+        print(f"   📡 네트워크 모드 변경: {mode_type}...", end="")
         current = self._get_config("networkIp")
-        if not current: return False
+        if not current:
+            print(" 실패 ❌")
+            return False
         
         current.update({"action": "networkIp", "mode": "0", "type": mode_type})
         if link_local_off: current["linkLocalOnly"] = "off"
@@ -498,7 +482,7 @@ class CameraApi:
         if "ipv6Address" in current: del current["ipv6Address"]
 
         success, msg = self._post_config(current, timeout=10)
-        print(" 성공 ✅" if success else f" 실패 ❌ ({msg.strip()})")
+        print(" 성공 ✅" if success else " 실패 ❌")
         return success
     
 
@@ -530,50 +514,38 @@ def _action_get_mac(web): return web.get_mac_address()
 def _action_verify_web_access(web, port):
     """Web Setup 페이지 접속 확인 (사용자 확인 대기)"""
     target_url = f"http://{web.ip}:{port}/setup/setup.html"
-    print(f"   🌐 접속 시도: {target_url}")
     try:
-        # Setup 페이지로 이동
         web.page.goto(target_url, timeout=15000)
-        # DOM 로딩 완료 대기
         web.page.wait_for_load_state("domcontentloaded", timeout=10000)
-        # 페이지 타이틀 출력
         title = web.page.title()
-        print(f"   ✅ 페이지 로드 완료 (Title: {title})")
-        print(f"   👀 브라우저에서 페이지를 확인하세요. 확인 후 'Enter'를 누르세요...")
-        input()  # 사용자 확인 대기
+        print(f"      페이지 로드 완료 (Title: {title})")
+        print(f"      👀 브라우저에서 페이지를 확인하세요. 확인 후 'Enter'를 누르세요...")
+        input()
         return True
     except Exception as e:
-        print(f"   ❌ Web 접속 실패: {e}")
+        print(f"      ❌ Web 접속 실패: {e}")
         return False
 
 def _action_webguard_login(web_dummy, fen_url, user, pw):
+    """WebGuard 로그인 실행"""
     try:
-        web_dummy.page.goto(fen_url); time.sleep(5)
+        web_dummy.page.goto(fen_url)
+        time.sleep(5)
         return webgaurd.run_login(user, pw)
-    except: return False
-
-def _refresh_session(api_obj):
-    print("\n🔄 [Session Refresh] iRAS 세션 갱신 (SSL Toggle)...")
-    try:
-        if api_obj.set_ssl(enable=True):
-            time.sleep(10)
-            if api_obj.set_ssl(enable=False):
-                time.sleep(10); return True
-    except Exception as e:
-        print(f"   🔥 세션 갱신 로직 에러: {e}")
-    return False
+    except:
+        return False
 
 def run_integrated_network_test(args):
     """
-    통합 네트워크 테스트 실행
+    통합 네트워크 테스트 실행 (총 13단계)
     """
     if not ctypes.windll.shell32.IsUserAnAdmin():
         return False, "관리자 권한이 필요합니다."
 
-    # Runtime Context 초기화 (Config + Args Override)
+    # 테스트 컨텍스트 초기화
     ctx = {
         "CAM_IP": args.ip or config.CAMERA_IP,
-        "PORT": config.CAMERA_PORT, # 초기 포트는 80
+        "PORT": config.CAMERA_PORT,
         "ID": args.id or config.USERNAME,
         "PW": args.pw or config.PASSWORD,
         "IFACE": args.iface or config.INTERFACE_NAME,
@@ -581,15 +553,18 @@ def run_integrated_network_test(args):
         "FEN_NAME": config.FEN_NAME
     }
 
-    # config 모듈의 인터페이스 이름 업데이트 (Scanner 등에서 사용)
     config.INTERFACE_NAME = ctx["IFACE"]
 
-    print("\n=== 🚀 Network & Automation Test Integrated Run ===")
+    print("\n" + "="*60)
+    print("🧪 [Network Test] 시작")
+    print("="*60)
     target_mac = None
 
     try:
-        # [Step 1] PC IP 고정 및 MAC 주소 획득
-        print("\n>>> [Step 1] Link-Local 활성화 준비")
+        # =========================================================
+        # Step 1: Link-Local 활성화 준비 (MAC 주소 획득)
+        # =========================================================
+        print("\n[Step 1/13] Link-Local 활성화 준비")
         NetworkManager.set_static_ip(config.PC_STATIC_IP, config.PC_SUBNET, config.PC_GW)
         
         if NetworkManager.ping(ctx["CAM_IP"]):
@@ -597,12 +572,17 @@ def run_integrated_network_test(args):
             if target_mac:
                 api = CameraApi(ctx["CAM_IP"], ctx["PORT"], ctx["ID"], ctx["PW"])
                 api.set_link_local_api(enable=True)
-        else: return False, "초기 카메라 접속 실패"
+                print(f"   ✅ Step 1 완료 (MAC: {target_mac})")
+        else: 
+            return False, "초기 카메라 접속 실패"
 
-        if not target_mac: return False, "MAC 주소 확보 실패"
+        if not target_mac: 
+            return False, "MAC 주소 확보 실패"
 
-        # [Step 2] Auto-IP 검증 및 DHCP 전환
-        print("\n>>> [Step 2] 169.254 Link-Local IP 검증 및 DHCP 설정")
+        # =========================================================
+        # Step 2: Auto-IP 검증 및 DHCP 설정
+        # =========================================================
+        print("\n[Step 2/13] Auto-IP 검증 (169.254.x.x) 및 DHCP 설정")
         NetworkManager.set_static_ip(config.PC_AUTO_IP, config.AUTO_SUBNET)
         NetworkManager.run_cmd("arp -d *")
         time.sleep(3)
@@ -610,14 +590,17 @@ def run_integrated_network_test(args):
         auto_ip = CameraScanner.find_ip_combined(target_mac, config.SCAN_AUTO_NET, timeout=40)
         
         if auto_ip and "169.254" in auto_ip:
-            print(f"🎉 Auto-IP 접속 성공: {auto_ip}")
+            print(f"   ✅ Auto-IP 탐색 성공: {auto_ip}")
             api_auto = CameraApi(auto_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
             api_auto.set_ip_address_api(mode_type="dhcp", link_local_off=True)
+            print(f"   ✅ Step 2 완료 (DHCP 설정 완료)")
         else:
-            print("⚠️ Auto-IP 탐색 실패")
+            print("   ⚠️ Auto-IP 탐색 실패")
 
-        # [Step 4] PC DHCP 복구 및 카메라 새 IP 탐색
-        print("\n>>> [Step 4] PC DHCP 복귀 및 카메라 새 IP 탐색")
+        # =========================================================
+        # Step 3: PC DHCP 복귀 및 카메라 새 IP 탐색
+        # =========================================================
+        print("\n[Step 3/13] PC DHCP 복귀 및 카메라 새 IP 탐색")
         NetworkManager.set_dhcp()
         
         new_dhcp_ip = None
@@ -630,150 +613,181 @@ def run_integrated_network_test(args):
                 temp_ip = CameraScanner.find_ip_combined(target_mac, config.SCAN_NET, timeout=8)
                 if temp_ip:
                     if temp_ip.startswith("169.254"):
-                        NetworkManager.run_cmd("arp -d *"); time.sleep(3); continue
+                        NetworkManager.run_cmd("arp -d *")
+                        time.sleep(3)
+                        continue
                     
-                    if temp_ip == ctx["CAM_IP"]: # 기존 IP와 동일하면 ping 확인
+                    if temp_ip == ctx["CAM_IP"]:
                         if subprocess.call(f"ping -n 1 -w 1000 {temp_ip}", shell=True, stdout=subprocess.DEVNULL) == 0:
-                            new_dhcp_ip = temp_ip; break
-                        else: NetworkManager.run_cmd("arp -d *"); continue
+                            new_dhcp_ip = temp_ip
+                            break
+                        else:
+                            NetworkManager.run_cmd("arp -d *")
+                            continue
                     
-                    new_dhcp_ip = temp_ip; break
+                    new_dhcp_ip = temp_ip
+                    break
                 time.sleep(3)
 
-            # [Step 5] FEN 설정 및 iRAS 연동
             if new_dhcp_ip:
-                print(f"✅ 카메라 DHCP IP: {new_dhcp_ip}")
-                api = CameraApi(new_dhcp_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-                api.set_fen_api(ctx["FEN_NAME"], ctx["FEN_SVR"])
-                api.verify_fen_setting(ctx["FEN_SVR"])
-                
-                # iRAS Setup
-                if iRAS_test.run_fen_setup_process(config.IRAS_DEVICE_NAME, ctx["FEN_NAME"]):
-                    iRAS_test.wait_for_connection()
-                    
-                    # Session Refresh (SSL Toggle)
-                    api.set_ssl(True); time.sleep(10); api.set_ssl(False); time.sleep(10)
-
-                    if iRAS_test.run_fen_verification("TcpDirectExternal"):
-                        print("🎉 [Pass] TcpDirectExternal")
-                    else:
-                        print("⚠️ 1차 검증 실패, 재시도...")
-                        if iRAS_test.run_fen_verification("TcpDirectExternal"): print("🎉 [Pass] 재시도 성공")
+                print(f"   ✅ Step 3 완료 (카메라 DHCP IP: {new_dhcp_ip})")
             else:
                 return False, "DHCP IP 탐색 실패"
+                
+        # =========================================================
+        # Step 4: FEN 설정 및 iRAS 연동
+        # =========================================================
+        if new_dhcp_ip:
+            print("\n[Step 4/13] FEN 설정 및 iRAS 연동")
+            api = CameraApi(new_dhcp_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
+            api.set_fen_api(ctx["FEN_NAME"], ctx["FEN_SVR"])
+            api.verify_fen_setting(ctx["FEN_SVR"])
+            
+            if iRAS_test.run_fen_setup_process(config.IRAS_DEVICE_NAME, ctx["FEN_NAME"]):
+                iRAS_test.wait_for_connection()
+                
+                # 세션 갱신 (SSL Toggle)
+                api.set_ssl(True)
+                time.sleep(10)
+                api.set_ssl(False)
+                time.sleep(10)
 
-        # [Step 7 ~ 9] NAT/UPNP Test (공유기 이동 필요)
+                if iRAS_test.run_fen_verification("TcpDirectExternal"):
+                    print("   ✅ Step 4 완료 (TcpDirectExternal)")
+                else:
+                    print("   ⚠️ 1차 검증 실패, 재시도...")
+                    if iRAS_test.run_fen_verification("TcpDirectExternal"):
+                        print("   ✅ Step 4 완료 (재시도 성공)")
+
+        # =========================================================
+        # Step 5: UPNP 활성화 및 DirectInternal 검증
+        # =========================================================
         router_cam_ip = None
         if new_dhcp_ip:
-            print("\n>>> [Step 7] UPNP 활성화 및 DirectInternal 검증")
-            input("🚨 [ACTION] 카메라와 PC를 '공유기'에 연결하고 Enter >> ")
-            NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("192.")
+            print("\n[Step 5/13] UPNP 활성화 및 DirectInternal 검증")
+            input("   🚨 [ACTION] 카메라와 PC를 '공유기'에 연결하고 Enter >> ")
+            NetworkManager.set_dhcp()
+            NetworkManager.wait_for_dhcp("192.")
             
             router_cam_ip = CameraScanner.find_ip_combined(target_mac, config.SCAN_NET, timeout=40)
-            if not router_cam_ip: router_cam_ip = auto_ip
+            if not router_cam_ip:
+                router_cam_ip = auto_ip
 
             if router_cam_ip:
-                print(f"✅ Router IP: {router_cam_ip}")
+                print(f"   ✅ Router IP: {router_cam_ip}")
                 api = CameraApi(router_cam_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
                 api.set_upnp_api(True)
                 iRAS_test.wait_for_connection()
-                if iRAS_test.run_fen_verification("TcpDirectInternal"): print("🎉 [Pass] TcpDirectInternal")
+                if iRAS_test.run_fen_verification("TcpDirectInternal"):
+                    print("   ✅ Step 5 완료 (TcpDirectInternal)")
 
-                # Step 8
-                print("\n>>> [Step 8] UDP Hole Punching")
-                api.set_upnp_api(False); time.sleep(5)
-                # Session Refresh
-                api.set_ssl(True); time.sleep(5); api.set_ssl(False); time.sleep(5)
+        # =========================================================
+        # Step 6: UDP Hole Punching
+        # =========================================================
+        if router_cam_ip:
+            print("\n[Step 6/13] UDP Hole Punching 검증")
+            api = CameraApi(router_cam_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
+            api.set_upnp_api(False)
+            time.sleep(5)
+            
+            # 세션 갱신
+            api.set_ssl(True)
+            time.sleep(5)
+            api.set_ssl(False)
+            time.sleep(5)
 
-                input("🚨 [ACTION] PC만 '사내망'으로 이동하고 Enter >> ")
-                NetworkManager.set_dhcp(); NetworkManager.wait_for_dhcp("10.")
-                iRAS_test.wait_for_connection()
-                if iRAS_test.run_fen_verification("UdpHolePunching"): print("🎉 [Pass] UdpHolePunching")
+            input("   🚨 [ACTION] PC만 '사내망'으로 이동하고 Enter >> ")
+            NetworkManager.set_dhcp()
+            NetworkManager.wait_for_dhcp("10.")
+            iRAS_test.wait_for_connection()
+            if iRAS_test.run_fen_verification("UdpHolePunching"):
+                print("   ✅ Step 6 완료 (UdpHolePunching)")
 
-                # Step 9
-                print("\n>>> [Step 9] FEN Relay")
-                input("🚨 [ACTION] 공유기 'UDP 차단' 후 사내망 복귀 Enter >> ")
-                iRAS_test.wait_for_connection()
-                if iRAS_test.run_fen_verification("Relay"): print("🎉 [Pass] FEN Relay")
+        # =========================================================
+        # Step 7: FEN Relay
+        # =========================================================
+        if router_cam_ip:
+            print("\n[Step 7/13] FEN Relay 검증")
+            input("   🚨 [ACTION] 공유기 'UDP 차단' 후 사내망 복귀, Enter >> ")
+            iRAS_test.wait_for_connection()
+            if iRAS_test.run_fen_verification("Relay"):
+                print("   ✅ Step 7 완료 (Relay)")
 
-                input("🚨 [ACTION] '카메라'를 사내망으로 복귀 후 Enter >> ")
+            input("   🚨 [ACTION] '카메라'를 사내망으로 복귀 후 Enter >> ")
 
-                # ARP 캐시를 미리 한 번 지워주면 더 좋습니다.
-                NetworkManager.run_cmd("arp -d *")
-                
-                new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, config.SCAN_NET, timeout=20)
+            NetworkManager.run_cmd("arp -d *")
+            new_dhcp_ip = CameraScanner.find_ip_combined(target_mac, config.SCAN_NET, timeout=20)
 
-                # [안전 장치 추가] 만약 여기서 IP 못 찾으면 뒤에 Step 11도 무조건 실패하므로, 갱신해줍니다.
-                if new_dhcp_ip:
-                    current_test_ip = new_dhcp_ip
-                    ctx["CAM_IP"] = new_dhcp_ip # 컨텍스트 업데이트
-                    print(f"   ✅ 사내망 복귀 완료. IP: {new_dhcp_ip}")
-                else:
-                    print("   ❌ 사내망 IP 탐색 실패. (Step 11 진행 불가)")
-                    # 여기서 return False를 하거나, 예외를 던지는 것이 좋지만 일단 진행한다면 로그라도 남깁니다.
+            if new_dhcp_ip:
+                current_test_ip = new_dhcp_ip
+                ctx["CAM_IP"] = new_dhcp_ip
+                print(f"   ✅ 사내망 복귀 완료 (IP: {new_dhcp_ip})")
+            else:
+                print("   ❌ 사내망 IP 탐색 실패 (이후 테스트 진행 불가)")
 
-        # [Step 10] WebGuard
+        # =========================================================
+        # Step 8: WebGuard Login
+        # =========================================================
         if new_dhcp_ip:
-            print("\n>>> [Step 10] WebGuard Login")
+            print("\n[Step 8/13] WebGuard Login 검증")
             fen_url = f"http://{ctx['FEN_SVR']}/{ctx['FEN_NAME']}"
             if _run_web_action(_action_webguard_login, ctx, fen_url, ctx["ID"], ctx["PW"]):
-                print("🎉 [Pass] WebGuard Login")
+                print("   ✅ Step 8 완료 (WebGuard Login)")
 
-        # [Step 15] 복구 (고정 IP로)
+        # =========================================================
+        # Step 9: 네트워크 설정 복구 (고정 IP로)
+        # =========================================================
         if new_dhcp_ip:
-            print("\n>>> [Step 15] 네트워크 설정 복구")
+            print("\n[Step 9/13] 네트워크 설정 복구 (고정 IP)")
             api = CameraApi(new_dhcp_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
             if api.set_ip_address_api("manual", config.CAMERA_IP, config.PC_GW, config.PC_SUBNET):
                 time.sleep(5)
                 if NetworkManager.ping(config.CAMERA_IP, timeout=10):
                     if iRAS_test.run_restore_ip_process(config.IRAS_DEVICE_NAME, config.CAMERA_IP):
-                        print("✅ 복구 완료")
+                        print("   ✅ Step 9 완료 (고정 IP 복구)")
                         iRAS_test.wait_for_connection()
 
-        # [Step 11] 포트 변경 테스트
+        # =========================================================
+        # Step 10: 포트 변경 테스트
+        # =========================================================
         current_test_ip = config.CAMERA_IP
         if current_test_ip:
-            print("\n>>> [Step 11] 포트 변경 테스트 (HTTP:8080, Remote:9200)")
+            print("\n[Step 10/13] 포트 변경 테스트")
             
             if not NetworkManager.ping(current_test_ip, timeout=5):
-                print(f"   ⚠️ 카메라({current_test_ip}) 연결 실패. Step 11 스킵")
+                print(f"   ⚠️ 카메라({current_test_ip}) 연결 실패. Step 10 스킵")
             else:
                 api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
                 
                 try:
-                    # [1] 포트 변경: HTTP 80->8080, Remote 8016->9200
-                    print(f"   [1] 포트 변경 API (HTTP: 80 -> 8080, Remote: 8016 -> 9200)...")
+                    print(f"   → 포트 변경: HTTP 80→8080, Remote 8016→9200")
                     if api.set_ports_api(web_port="8080", remote_port="9200"):
                         ctx["PORT"] = "8080"
                         print("   ✅ 포트 변경 성공")
                         time.sleep(3)
                         
-                        # [2] 웹 접속 확인: IP:8080/setup/setup.html
-                        print(f"\n   [2] 웹 접속 확인 (http://{current_test_ip}:8080/setup/setup.html)...")
+                        print(f"   → 웹 접속 확인: http://{current_test_ip}:8080")
                         if _run_web_action(_action_verify_web_access, ctx, "8080"):
                             print("   ✅ 웹 접속 확인 완료")
                         else:
                             print("   ⚠️ 웹 접속 실패")
                         
-                        # [3] iRAS 9200포트 검색 및 확인
-                        print(f"\n   [3] iRAS 9200포트 검색...")
+                        print(f"   → iRAS 9200포트 검색 중...")
                         if iRAS_test.run_port_change_process(config.IRAS_DEVICE_NAME, "9200", current_test_ip):
-                            print("   ✅ iRAS 9200포트 검색 확인 완료")
+                            print("   ✅ iRAS 9200포트 확인 완료")
                         else:
                             print("   ⚠️ iRAS 설정 변경 실패")
                         
-                        # [4] 포트 복구: HTTP 80, Remote 8016
-                        print(f"\n   [4] 포트 복구 (HTTP: 80, Remote: 8016)...")
+                        print(f"   → 포트 복구: HTTP 80, Remote 8016")
                         recovery_api = CameraApi(current_test_ip, "8080", ctx["ID"], ctx["PW"])
                         if recovery_api.reset_ports_default():
                             print("   ✅ 포트 복구 완료")
                             ctx["PORT"] = "80"
                             time.sleep(3)
                             
-                            # [5] Live 화면 연결 확인
-                            print(f"\n   [5] Live 화면 연결 확인...")
+                            print(f"   → Live 화면 연결 확인 중...")
                             if iRAS_test.wait_for_connection(timeout=30):
-                                print("   ✅ Live 화면 연결 확인 완료")
+                                print("   ✅ Step 10 완료 (Live 화면 연결)")
                             else:
                                 print("   ⚠️ Live 화면 연결 실패")
                         else:
@@ -784,81 +798,92 @@ def run_integrated_network_test(args):
                 except Exception as e:
                     print(f"   🔥 포트 변경 테스트 중 오류: {e}")
 
-        # [Step 12] 대역폭
+        # =========================================================
+        # Step 11: 대역폭 제한 테스트
+        # =========================================================
         if current_test_ip:
-            print("\n>>> [Step 12] 대역폭 제한 테스트")
+            print("\n[Step 11/13] 대역폭 제한 테스트")
             api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
             
-            # 1. 초기화: 확실한 비교를 위해 먼저 제한을 풉니다.
-            api.set_bandwidth_limit(True, 102400) 
-            time.sleep(3) # 설정 적용 대기
+            api.set_bandwidth_limit(True, 102400)
+            time.sleep(3)
 
-            # 2. 제한 켜기 전 IPS 측정 (Base Data)
             base_ips = iRAS_test.IRASController().get_current_ips()
-            print(f"    - Base IPS: {base_ips}")
+            print(f"   → Base IPS: {base_ips}")
 
-            # 3. 대역폭 제한 설정 (1024 bps)
             if api.set_bandwidth_limit(True, 1024):
-                print("    - 대역폭 제한 설정(1024) 완료. 15초 대기 중...")
-                time.sleep(20)  # 요청하신 15초 대기 (네트워크 버퍼 소진 및 안정화 시간)
+                print("   → 대역폭 제한 설정 (1024 kbps), 20초 대기 중...")
+                time.sleep(20)
                 
-                # 4. 제한 후 IPS 측정
                 limit_ips = iRAS_test.IRASController().get_current_ips()
-                print(f"    - Limit IPS: {limit_ips}")
+                print(f"   → Limit IPS: {limit_ips}")
 
-                # 5. 결과 비교 (Base IPS 대비 떨어졌는지 확인)
-                # 노이즈를 고려하여 Base 대비 80% 이하로 떨어지면 Pass로 간주 (비율은 필요 시 조정)
                 if limit_ips < base_ips * 0.8:
-                    print(f"🎉 [Pass] 제한 확인 ({base_ips} -> {limit_ips})")
+                    print(f"   ✅ Step 11 완료 (IPS 감소 확인: {base_ips} → {limit_ips})")
                 else:
-                    print(f"❌ [Fail] IPS 감소 확인되지 않음 ({base_ips} -> {limit_ips})")
-            
+                    print(f"   ❌ IPS 감소 미확인 ({base_ips} → {limit_ips})")
             else:
-                print("❌ [Fail] 대역폭 제한 설정 실패")
+                print("   ❌ 대역폭 제한 설정 실패")
             
             time.sleep(5)
-
-            # 6. 종료 전 제한 해제 (성공/실패 여부와 관계없이 실행)
             api.set_bandwidth_limit(False)
-            print("    - 대역폭 제한 해제 완료")
+            print("   → 대역폭 제한 해제 완료")
             time.sleep(5)
 
-        # [Step 13] IP 필터링
+        # =========================================================
+        # Step 12: IP 필터링 테스트
+        # =========================================================
         if current_test_ip:
-            print("\n>>> [Step 13] IP 필터링 테스트")
+            print("\n[Step 12/13] IP 필터링 테스트")
             my_ip = get_local_ip()
             api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
             
+            print(f"   → IP 차단 설정: {my_ip}")
             if api.set_ip_filter("deny", deny_list=my_ip):
                 time.sleep(5)
                 try:
                     requests.get(f"http://{current_test_ip}:{ctx['PORT']}", timeout=3)
-                    print("❌ [Fail] 접속됨")
-                except: print("🎉 [Pass] 접속 차단됨")
+                    print("   ❌ 접속 차단 실패 (접속됨)")
+                except:
+                    print("   ✅ Step 12 완료 (접속 차단 확인)")
                 
                 # 복구
+                print("   → IP 필터 복구 중...")
                 NetworkManager.set_static_ip("10.0.131.200", config.PC_SUBNET, config.PC_GW)
                 if NetworkManager.ping(current_test_ip):
                     CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"]).set_ip_filter("off")
                 NetworkManager.set_static_ip(config.PC_STATIC_IP, config.PC_SUBNET, config.PC_GW)
+                print("   → IP 필터 복구 완료")
 
             time.sleep(5)
 
-        # [Step 14] SSL
+        # =========================================================
+        # Step 13: SSL 모드 검증
+        # =========================================================
         if current_test_ip:
-            print("\n>>> [Step 14] SSL 모드 검증")
+            print("\n[Step 13/13] SSL 모드 검증")
             api = CameraApi(current_test_ip, ctx["PORT"], ctx["ID"], ctx["PW"])
-            for mode, expected in [("standard", "ExcludeMultimedia"), ("high", "PartiallyMultimedia"), ("veryHigh", "FullPacket")]:
+            
+            for mode, expected in [("standard", "ExcludeMultimedia"), 
+                                   ("high", "PartiallyMultimedia"), 
+                                   ("veryHigh", "FullPacket")]:
+                print(f"   → SSL 모드 변경: {mode}")
                 if api.set_ssl(True, mode):
                     time.sleep(20)
                     status = iRAS_test.IRASController().get_current_ssl_info()
                     if status and expected.lower() in status.lower().replace(" ", ""):
-                        print(f"🎉 [Pass] {mode}")
+                        print(f"   ✅ {mode} 검증 성공")
+            
             api.set_ssl(False)
+            print("   ✅ Step 13 완료 (SSL 검증 완료)")
 
-        return True, "Step 11-14 Completed"
+        print("\n" + "="*60)
+        print("✅ Network Test 완료")
+        print("="*60)
+        return True, "전체 테스트 완료"
 
     except Exception as e:
+        print(f"\n❌ 테스트 실패: {e}")
         return False, str(e)
 
 
@@ -867,10 +892,11 @@ if __name__ == "__main__":
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
         sys.exit()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ip', default=None)
-    parser.add_argument('--id', default=None)
-    parser.add_argument('--pw', default=None)
-    parser.add_argument('--iface', default=None)
-    parser.add_argument('--from-port', action='store_true', help='포트 변경 테스트(Step 11) 이후부터만 실행')
+    parser = argparse.ArgumentParser(description='카메라 네트워크 통합 테스트 (13단계)')
+    parser.add_argument('--ip', default=None, help='카메라 IP 주소')
+    parser.add_argument('--id', default=None, help='카메라 사용자 ID')
+    parser.add_argument('--pw', default=None, help='카메라 비밀번호')
+    parser.add_argument('--iface', default=None, help='네트워크 인터페이스 이름')
     args = parser.parse_args()
+    
+    run_integrated_network_test(args)
