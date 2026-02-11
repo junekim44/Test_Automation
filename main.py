@@ -40,6 +40,13 @@ TEST_CATEGORIES = {
             ("user_group", "사용자/그룹 관리", run_user_group_test, True),
         ]
     },
+    "network": {
+        "name": "📡 네트워크 테스트",
+        "tests": [
+            ("network_full", "네트워크 통합 테스트 (별도 프로세스)", None, False),
+        ],
+        "special": "subprocess"  # 특수 실행 방식 표시
+    },
     "video": {
         "name": "🎥 비디오 테스트",
         "tests": [
@@ -166,51 +173,74 @@ def run_tests_with_browser(tests_to_run, camera_ip, username, password):
     """브라우저가 필요한 테스트 실행"""
     with sync_playwright() as p:
         print("\n🌐 Chrome 브라우저를 실행합니다...")
-        browser = p.chromium.launch(channel="chrome", headless=False, slow_mo=1000)
+        browser = p.chromium.launch(channel="chrome", headless=False, slow_mo=500)
         context = browser.new_context(
             http_credentials={'username': username, 'password': password}
         )
         page = context.new_page()
         
         try:
-            print("[로그인] 카메라 웹 페이지 접속 중...")
+            print("   카메라 웹 페이지 접속 중...")
             page.goto(config.CAMERA_URL)
             page.wait_for_selector("#Page200_id", timeout=10000)
+            print("   ✅ 로그인 성공\n")
             
             api_client = CameraApiClient(page, camera_ip)
             
             # 테스트 실행
+            passed = 0
+            failed = 0
+            
             for test_id, test_name, test_func, needs_browser in tests_to_run:
                 print(f"\n{'='*60}")
-                print(f"🧪 [{test_name}] 테스트 시작...")
+                print(f"🧪 [{passed+failed+1}/{len(tests_to_run)}] {test_name}")
                 print(f"{'='*60}")
                 
-                # 테스트 함수의 시그니처에 따라 인자 전달
-                if test_id in ["default_setup", "setup_roundtrip", "language", "datetime"]:
-                    success, msg = test_func(page, api_client)
-                elif test_id == "user_group":
-                    success, msg = test_func(page, camera_ip, username, password)
-                else:
-                    success, msg = test_func(page, camera_ip)
-                
-                if not success:
-                    raise Exception(f"[{test_name}] 실패: {msg}")
-                print(f"🎉 [{test_name}] 성공: {msg}")
+                try:
+                    # 테스트 함수의 시그니처에 따라 인자 전달
+                    if test_id in ["default_setup", "setup_roundtrip", "language", "datetime"]:
+                        success, msg = test_func(page, api_client)
+                    elif test_id == "user_group":
+                        success, msg = test_func(page, camera_ip, username, password)
+                    else:
+                        success, msg = test_func(page, camera_ip)
+                    
+                    if success:
+                        print(f"✅ 성공: {msg}")
+                        passed += 1
+                    else:
+                        print(f"❌ 실패: {msg}")
+                        failed += 1
+                        
+                except Exception as e:
+                    print(f"❌ 예외 발생: {e}")
+                    failed += 1
             
-            print("\n✅ 모든 테스트가 성공적으로 완료되었습니다.")
-            input("\n엔터 키를 누르면 종료합니다...")
+            # 최종 결과
+            print(f"\n{'='*60}")
+            print(f"📊 테스트 결과")
+            print(f"{'='*60}")
+            print(f"✅ 성공: {passed}/{len(tests_to_run)}")
+            print(f"❌ 실패: {failed}/{len(tests_to_run)}")
+            print(f"{'='*60}")
+            
+            if failed > 0:
+                print(f"\n⚠️  {failed}개의 테스트가 실패했습니다.")
+            else:
+                print("\n🎉 모든 테스트가 성공적으로 완료되었습니다!")
             
         except Exception as e:
-            print(f"\n🔥 [실패] 테스트 중단됨: {e}")
+            print(f"\n🔥 [치명적 오류] {e}")
             import traceback
             traceback.print_exc()
-            input("\n에러를 확인하세요. 엔터를 누르면 종료됩니다...") 
         finally:
             browser.close()
+            print("\n브라우저를 종료했습니다.")
 
 def run_tests_without_browser(tests_to_run, camera_ip, username, password):
     """브라우저 없이 API만으로 실행 가능한 테스트"""
     with sync_playwright() as p:
+        print("\n🔧 백그라운드 세션 초기화 중...")
         # headless 모드로 실행 (화면 없음)
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -221,29 +251,84 @@ def run_tests_without_browser(tests_to_run, camera_ip, username, password):
         try:
             # 최소한의 인증만 수행
             page.goto(config.CAMERA_URL, wait_until="domcontentloaded")
+            print("   ✅ 인증 완료\n")
             
             # 테스트 실행
+            passed = 0
+            failed = 0
+            
             for test_id, test_name, test_func, needs_browser in tests_to_run:
                 print(f"\n{'='*60}")
-                print(f"🧪 [{test_name}] 테스트 시작...")
+                print(f"🧪 [{passed+failed+1}/{len(tests_to_run)}] {test_name}")
                 print(f"{'='*60}")
                 
-                success, msg = test_func(page, camera_ip)
-                
-                if not success:
-                    raise Exception(f"[{test_name}] 실패: {msg}")
-                print(f"🎉 [{test_name}] 성공: {msg}")
+                try:
+                    success, msg = test_func(page, camera_ip)
+                    
+                    if success:
+                        print(f"✅ 성공: {msg}")
+                        passed += 1
+                    else:
+                        print(f"❌ 실패: {msg}")
+                        failed += 1
+                        
+                except Exception as e:
+                    print(f"❌ 예외 발생: {e}")
+                    failed += 1
             
-            print("\n✅ 모든 테스트가 성공적으로 완료되었습니다.")
-            input("\n엔터 키를 누르면 종료합니다...")
+            # 최종 결과
+            print(f"\n{'='*60}")
+            print(f"📊 테스트 결과")
+            print(f"{'='*60}")
+            print(f"✅ 성공: {passed}/{len(tests_to_run)}")
+            print(f"❌ 실패: {failed}/{len(tests_to_run)}")
+            print(f"{'='*60}")
+            
+            if failed > 0:
+                print(f"\n⚠️  {failed}개의 테스트가 실패했습니다.")
+            else:
+                print("\n🎉 모든 테스트가 성공적으로 완료되었습니다!")
             
         except Exception as e:
-            print(f"\n🔥 [실패] 테스트 중단됨: {e}")
+            print(f"\n🔥 [치명적 오류] {e}")
             import traceback
             traceback.print_exc()
-            input("\n에러를 확인하세요. 엔터를 누르면 종료됩니다...") 
         finally:
             browser.close()
+
+def run_network_test(camera_ip, username, password, interface_name):
+    """네트워크 테스트를 별도 프로세스로 실행 (브라우저 충돌 방지)"""
+    print("\n" + "="*60)
+    print("📡 네트워크 통합 테스트")
+    print("="*60)
+    print("   ℹ️  브라우저 세션 충돌 방지를 위해 별도 프로세스로 실행합니다.\n")
+    
+    # subprocess로 실행할 명령어 구성
+    cmd = [
+        sys.executable, "network_test.py",
+        "--ip", camera_ip,
+        "--id", username,
+        "--pw", password,
+        "--iface", interface_name
+    ]
+    
+    try:
+        # 별도 프로세스로 실행 (현재 콘솔에서)
+        result = subprocess.run(cmd)
+        
+        if result.returncode == 0:
+            print("\n✅ 네트워크 테스트가 정상 종료되었습니다.")
+            return True
+        else:
+            print(f"\n⚠️  네트워크 테스트가 코드 {result.returncode}를 반환했습니다.")
+            return False
+            
+    except FileNotFoundError:
+        print(f"\n❌ [오류] network_test.py 파일을 찾을 수 없습니다.")
+        return False
+    except Exception as e:
+        print(f"\n🔥 [실패] 네트워크 테스트 실행 중 오류: {e}")
+        return False
 
 def main():
     # -----------------------------------------------------------
@@ -267,15 +352,36 @@ def main():
     # -----------------------------------------------------------
     selected_category = show_test_menu()
     
-    # 실행할 테스트 목록 구성
+    # -----------------------------------------------------------
+    # 📡 네트워크 테스트는 별도 처리
+    # -----------------------------------------------------------
+    if selected_category == "network":
+        print("\n✅ 설정 완료. 네트워크 테스트를 시작합니다...\n")
+        time.sleep(1)
+        run_network_test(camera_ip, username, password, interface_name)
+        return
+    
+    # -----------------------------------------------------------
+    # 🧪 일반 테스트 실행
+    # -----------------------------------------------------------
     tests_to_run = []
     needs_browser = False
+    run_network_after = False
     
     if selected_category == "all":
-        # 모든 테스트 실행
+        # 모든 테스트 실행 (네트워크 제외)
         for cat_key in TEST_CATEGORIES:
-            tests_to_run.extend(TEST_CATEGORIES[cat_key]["tests"])
+            if cat_key != "network":  # 네트워크는 별도 처리
+                tests_to_run.extend(TEST_CATEGORIES[cat_key]["tests"])
         needs_browser = True  # 전체 실행 시 브라우저 필요
+        
+        # 전체 테스트 후 네트워크 테스트 실행 여부 확인
+        print("\n" + "="*60)
+        print("📡 네트워크 테스트도 실행하시겠습니까?")
+        print("="*60)
+        print("   ℹ️  네트워크 테스트는 별도 프로세스로 실행됩니다.")
+        confirm = input("   실행 (y/n): ").strip().lower()
+        run_network_after = (confirm == 'y')
     else:
         # 선택한 카테고리의 테스트만 실행
         category = TEST_CATEGORIES[selected_category]
@@ -283,28 +389,26 @@ def main():
         # 하나라도 브라우저가 필요하면 브라우저 모드로 실행
         needs_browser = any(test[3] for test in tests_to_run)
     
-    # -----------------------------------------------------------
-    # 🖥️ 새 콘솔 창 열기 (테스트 시작 시에만)
-    # -----------------------------------------------------------
-    if "--new-console" not in sys.argv:
-        print("\n🖥️  테스트 가시성을 위해 새 터미널 창을 엽니다...")
-        CREATE_NEW_CONSOLE = 0x00000010
-        subprocess.Popen(
-            [sys.executable] + sys.argv + ["--new-console"], 
-            creationflags=CREATE_NEW_CONSOLE
-        )
-        return
-    
-    # -----------------------------------------------------------
-    # 🧪 테스트 실행
-    # -----------------------------------------------------------
     print(f"\n✅ 설정 완료. {len(tests_to_run)}개의 테스트를 시작합니다...\n")
-    time.sleep(2)
+    time.sleep(1)
     
+    # 일반 테스트 실행
     if needs_browser:
         run_tests_with_browser(tests_to_run, camera_ip, username, password)
     else:
         run_tests_without_browser(tests_to_run, camera_ip, username, password)
+    
+    # 전체 테스트 모드에서 네트워크 테스트 실행
+    if run_network_after:
+        print("\n" + "="*60)
+        input("일반 테스트 완료. 네트워크 테스트를 시작하려면 엔터를 누르세요...")
+        print("="*60)
+        run_network_test(camera_ip, username, password, interface_name)
+    
+    print("\n\n" + "="*60)
+    print("🎉 모든 작업이 완료되었습니다!")
+    print("="*60)
+    input("\n엔터 키를 누르면 프로그램을 종료합니다...")
 
 if __name__ == "__main__":
     try:
