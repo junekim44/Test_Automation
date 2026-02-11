@@ -4,10 +4,10 @@ import re
 from playwright.sync_api import Page
 from common_actions import parse_api_response
 
-# 💡 iRAS 컨트롤러 가져오기 (OSD 텍스트 읽기용)
+# iRAS 컨트롤러 가져오기 (OSD 텍스트 읽기용)
 from iRAS_test import IRASController
 
-# 💡 비디오 테스트 설정값 가져오기
+# 비디오 테스트 설정값 가져오기
 from config import (
     IRAS_TITLES,
     VIDEO_WAIT_TIME,
@@ -52,26 +52,46 @@ from config import (
     VIDEO_OSD_DATETIME_POSITION,
 )
 
+# ===========================================================
+# 🖨️ [출력] 표준 출력 함수
+# ===========================================================
+def print_step(step_num: int, total_steps: int, msg: str):
+    """단계 표시"""
+    print(f"\n[{step_num}/{total_steps}] {msg}")
+
+def print_action(msg: str):
+    """작업 진행 표시"""
+    print(f"   → {msg}")
+
+def print_success(msg: str = None):
+    """성공 표시"""
+    if msg:
+        print(f"   ✅ {msg}")
+    else:
+        print(f"   ✅ 완료")
+
+def print_warning(msg: str):
+    """경고 표시"""
+    print(f"   ⚠️ {msg}")
+
+def print_error(msg: str):
+    """에러 표시"""
+    print(f"   ❌ {msg}")
 
 # ===========================================================
 # 📸 [Snapshot] API를 통한 스냅샷 캡처 함수
 # ===========================================================
 def trigger_iras_snapshot(page: Page, camera_ip: str, file_name=None):
-    """
-    videoSnapshot API를 사용하여 카메라에서 직접 JPEG 이미지를 받아서 저장합니다.
-    """
+    """videoSnapshot API를 사용하여 카메라에서 직접 JPEG 이미지를 받아서 저장"""
     try:
-        # API URL 생성
         api_url = f"http://{camera_ip}/cgi-bin/webSetup.cgi?action=videoSnapshot&mode=1&streamIndex=1"
         
-        # JavaScript로 이미지 다운로드 (Base64 인코딩)
         image_base64 = page.evaluate("""async (url) => {
             try {
                 const response = await fetch(url);
                 if (!response.ok) return null;
                 const blob = await response.blob();
                 
-                // Blob을 Base64로 변환
                 return new Promise((resolve) => {
                     const reader = new FileReader();
                     reader.onloadend = () => resolve(reader.result.split(',')[1]);
@@ -83,54 +103,38 @@ def trigger_iras_snapshot(page: Page, camera_ip: str, file_name=None):
         }""", api_url)
         
         if not image_base64:
-            print("   ⚠️ 스냅샷 다운로드 실패")
             return
         
-        # Base64 디코딩
         import base64
         image_data = base64.b64decode(image_base64)
         
-        # ==========================================
-        # 📂 저장 경로 설정 (바탕화면 > TestCapture)
-        # ==========================================
         desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
         save_folder = os.path.join(desktop_path, "TestCapture")
         
-        # 폴더가 없으면 생성
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
-            print(f"   📂 폴더 생성됨: {save_folder}")
 
-        # 파일명이 지정되지 않았으면 현재 시간으로 자동 생성
         if file_name is None:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             file_name = f"snapshot_{timestamp}.jpg"
         
-        # 확장자가 없으면 .jpg 추가
         if not file_name.lower().endswith(('.jpg', '.jpeg')):
             file_name = file_name.rsplit('.', 1)[0] + '.jpg'
         
-        # 경로 합치기
         full_path = os.path.join(save_folder, file_name)
 
-        # 파일 저장
         with open(full_path, 'wb') as f:
             f.write(image_data)
-        
-        print(f"   💾 [Snapshot] 저장 완료: {file_name}")
             
-    except Exception as e:
-        print(f"   ⚠️ 스크린샷 오류: {e}")
+    except Exception:
+        pass
 
 # ===========================================================
 # ⚙️ [API] 공통 제어 함수 (GET/SET)
 # ===========================================================
 
 def _api_get(page, ip, action, channel=None):
-    """
-    API GET 요청
-    channel: videoPrivacy 같은 일부 API는 channel 파라미터 필요 (예: channel=1)
-    """
+    """API GET 요청"""
     api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action={action}&mode=1"
     if channel is not None:
         api_url += f"&channel={channel}"
@@ -147,19 +151,12 @@ def _api_get(page, ip, action, channel=None):
         if response_text and not response_text.startswith("Error"):
             return parse_api_response(response_text)
         else:
-            # 에러 응답 로깅
-            if response_text:
-                print(f"   ⚠️ [API GET Error] action={action}, 응답: {response_text[:200]}")
             return None
-    except Exception as e:
-        print(f"   🔥 [API GET Exception] action={action}, 오류: {e}")
+    except Exception:
         return None
 
 def _api_set(page, ip, action, params, channel=None):
-    """
-    API SET 요청
-    channel: videoPrivacy 같은 일부 API는 channel 파라미터 필요 (예: channel=1)
-    """
+    """API SET 요청"""
     query_str = "&".join([f"{k}={v}" for k, v in params.items()])
     api_url = f"http://{ip}/cgi-bin/webSetup.cgi?action={action}&mode=0"
     if channel is not None:
@@ -178,14 +175,11 @@ def _api_set(page, ip, action, params, channel=None):
         if "returnCode=0" in response_text:
             return True
         else:
-            print(f"   ❌ [API Fail] 요청: {params}") 
-            print(f"   ❌ [API Fail] 응답: {response_text.strip()}")
             return False
-    except Exception as e:
-        print(f"   🔥 [API Error] {e}")
+    except Exception:
         return False
 
-# 래퍼 함수들
+# API 래퍼 함수들
 def api_get_video_easy_setting(page, ip): return _api_get(page, ip, "videoEasySetting")
 def api_set_video_easy_setting(page, ip, p): return _api_set(page, ip, "videoEasySetting", p)
 
@@ -211,11 +205,9 @@ def api_get_video_mat(page, ip): return _api_get(page, ip, "videoMat")
 def api_set_video_mat(page, ip, p): return _api_set(page, ip, "videoMat", p)
 
 def api_get_video_privacy(page, ip, channel=1): 
-    """videoPrivacy API GET - channel 파라미터 사용 (기본값: 1)"""
     return _api_get(page, ip, "videoPrivacy", channel=channel)
 
 def api_set_video_privacy(page, ip, p, channel=1): 
-    """videoPrivacy API SET - channel 파라미터 사용 (기본값: 1)"""
     return _api_set(page, ip, "videoPrivacy", p, channel=channel)
 
 def api_get_video_osd_text(page, ip): return _api_get(page, ip, "videoOsdText")
@@ -316,13 +308,12 @@ def parse_stream_info(text):
 # ===========================================================
 def run_self_adjust_mode_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Self Adjust Mode (Easy Video Setting) Test")
+    print(f"🎬 [Video Test 1/10] Self Adjust Mode")
     print("=======================================================")
     trigger_iras_snapshot(page, camera_ip, "기본값") 
     failed_count = 0
 
-    # 1. Preset
-    print("\n[Step 1] 프리셋 모드(Preset) 테스트")
+    print_step(1, 2, "프리셋 모드 테스트")
     preset_names = {
         "0": "Custom",
         "1": "Natural", 
@@ -332,26 +323,26 @@ def run_self_adjust_mode_test(page: Page, camera_ip: str):
     
     for val, name in VIDEO_PRESET_MODES.items():
         preset_name = preset_names.get(val, name)
-        print(f"\n   👉 설정 변경: {name} (Value: {val})")
+        print_action(f"모드 변경: {name}")
         if api_set_video_easy_setting(page, camera_ip, {"easyDayType": val, "easyNightType": val}):
-            print(f"   ⏳ 영상 확인 ({VIDEO_WAIT_TIME}s)...")
             time.sleep(VIDEO_WAIT_TIME)
             trigger_iras_snapshot(page, camera_ip, f"{preset_name}.png")
             curr = api_get_video_easy_setting(page, camera_ip)
-            if curr and curr.get("easyDayType") == val: print(f"   ✅ Pass")
+            if curr and curr.get("easyDayType") == val:
+                print_success(f"{name} 검증 완료")
             else: 
-                print(f"   ❌ Fail")
+                print_error(f"{name} 검증 실패")
                 failed_count += 1
-        else: failed_count += 1
+        else:
+            failed_count += 1
     
-    # Step 1 복구: Natural로 복구
-    print("\n   🔄 Step 1 복구: Natural 모드로 복구")
+    print_action("Natural 모드로 복구 중...")
     api_set_video_easy_setting(page, camera_ip, {"easyDayType": "1", "easyNightType": "1"})
     time.sleep(2)
+    print_success("복구 완료")
 
-    # 2. Custom
-    print("\n[Step 2] Custom 모드 테스트")
-    print("   👉 모드 변경: Custom (사용자 설정) 진입")
+    print_step(2, 2, "Custom 모드 테스트")
+    print_action("Custom 모드 진입 중...")
     
     curr_set = api_get_video_easy_setting(page, camera_ip)
     if curr_set:
@@ -361,16 +352,17 @@ def run_self_adjust_mode_test(page: Page, camera_ip: str):
         
         if not api_set_video_easy_setting(page, camera_ip, payload):
             return False, "Custom 진입 실패"
-    else: return False, "설정 조회 실패"
+    else:
+        return False, "설정 조회 실패"
     
     time.sleep(2)
     trigger_iras_snapshot(page, camera_ip, "Custom_진입.png")
+    print_success("Custom 모드 진입 완료")
 
-    for param, api_key in [("Sharpness","easyDaySharpness"), ("Contrast","easyDayContrast"), ("Brightness","easyDayBrightness"), ("Colors","easyDayColors")]:
-        print(f"\n   --- [Target: {param}] ---")
+    for param, api_key in [("Sharpness","easyDaySharpness"), ("Contrast","easyDayContrast"), 
+                           ("Brightness","easyDayBrightness"), ("Colors","easyDayColors")]:
+        print(f"\n   [{param}]")
         for val in VIDEO_PARAM_RANGES[param]:
-            print(f"   👉 값 변경: {val}")
-            
             curr_set = api_get_video_easy_setting(page, camera_ip)
             if not curr_set: continue
 
@@ -381,25 +373,28 @@ def run_self_adjust_mode_test(page: Page, camera_ip: str):
             if 'returnCode' in payload: del payload['returnCode']
 
             if api_set_video_easy_setting(page, camera_ip, payload):
-                print(f"   ⏳ 영상 확인 ({VIDEO_WAIT_TIME}s)...")
                 time.sleep(VIDEO_WAIT_TIME)
                 trigger_iras_snapshot(page, camera_ip, f"Custom_{param}_{val}.png")
                 curr = api_get_video_easy_setting(page, camera_ip)
                 if curr and curr.get(api_key) == val: 
-                    print(f"   ✅ Pass: {val}")
+                    print(f"      {val}: ✅")
                 else: 
-                    print(f"   ❌ Fail: {curr.get(api_key)}")
+                    print(f"      {val}: ❌")
                     failed_count += 1
             else: 
                 failed_count += 1
     
-    # Step 2 복구: Natural로 복구
-    print("\n   🔄 Step 2 복구: Natural 모드로 복구")
+    print_action("Natural 모드로 복구 중...")
     api_set_video_easy_setting(page, camera_ip, {"easyDayType": "1", "easyNightType": "1"})
     time.sleep(2)
+    print_success("복구 완료")
     
-    if failed_count == 0: return True, "Self Adjust Mode 성공"
-    else: return False, f"Self Adjust Mode 실패 ({failed_count}건)"
+    if failed_count == 0:
+        print("\n✅ Self Adjust Mode 테스트 완료")
+        return True, "Self Adjust Mode 성공"
+    else:
+        print(f"\n❌ Self Adjust Mode 테스트 실패 ({failed_count}건)")
+        return False, f"Self Adjust Mode 실패 ({failed_count}건)"
 
 
 # ===========================================================
@@ -407,7 +402,7 @@ def run_self_adjust_mode_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_video_image_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Image Setting (Mirroring / Pivot) Test")
+    print(f"🎬 [Video Test 2/10] Image Setting")
     print("=======================================================")
     
     base_set = api_get_video_image(page, camera_ip)
@@ -416,8 +411,7 @@ def run_video_image_test(page: Page, camera_ip: str):
     
     failed_count = 0
 
-    # Mirroring
-    print("\n[Step 1] Mirroring 테스트")
+    print_step(1, 2, "Mirroring 테스트")
     for mode in VIDEO_MIRRORING_OPTS:
         print(f"\n   👉 Mirroring: {mode}")
         
@@ -449,8 +443,7 @@ def run_video_image_test(page: Page, camera_ip: str):
         api_set_video_image(page, camera_ip, payload)
         time.sleep(2)
     
-    # Pivot
-    print("\n[Step 2] Pivot 테스트")
+    print_step(2, 2, "Pivot 테스트")
     for mode in VIDEO_PIVOT_OPTS:
         print(f"\n   👉 Pivot: {mode}")
         
@@ -491,13 +484,12 @@ def run_video_image_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_white_balance_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] White Balance Test")
+    print(f"🎬 [Video Test 3/10] White Balance")
     print("=======================================================")
     trigger_iras_snapshot(page, camera_ip, "WB_기본값.png")
     failed_count = 0
 
-    # Preset (manual과 hold 제외한 모든 모드 테스트)
-    print("\n[Step 1] Preset Mode 테스트")
+    print_step(1, 3, "Preset Mode 테스트")
     for mode_val, mode_name in VIDEO_WB_MODES.items():
         if mode_val in ["manual", "hold"]: continue  # manual과 hold는 별도 테스트
         print(f"\n   👉 설정: {mode_name} ({mode_val})")
@@ -532,8 +524,7 @@ def run_white_balance_test(page: Page, camera_ip: str):
         api_set_video_wb(page, camera_ip, payload)
         time.sleep(2)
 
-    # Hold Mode
-    print("\n[Step 2] Hold Mode 테스트")
+    print_step(2, 3, "Hold Mode 테스트")
     if "hold" in VIDEO_WB_MODES:
         print(f"   👉 설정: {VIDEO_WB_MODES['hold']} (hold)")
         
@@ -569,8 +560,7 @@ def run_white_balance_test(page: Page, camera_ip: str):
         api_set_video_wb(page, camera_ip, payload)
         time.sleep(2)
 
-    # Manual
-    print("\n[Step 3] Manual Mode (Gain) 테스트")
+    print_step(3, 3, "Manual Mode (Gain) 테스트")
     
     curr_set = api_get_video_wb(page, camera_ip)
     if not curr_set: return False, "설정 조회 실패"
@@ -627,14 +617,13 @@ def run_white_balance_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_exposure_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Exposure Test (Gain, Shutter, WDR)")
+    print(f"🎬 [Video Test 4/10] Exposure")
     print("=======================================================")
     
     trigger_iras_snapshot(page, camera_ip, "Exposure_기본값.png")
     failed_count = 0
 
-    # 1. Target Gain
-    print("\n[Step 1] AE Target Gain 변경 (-10 <-> 10)")
+    print_step(1, 3, "AE Target Gain 테스트")
     for val in VIDEO_TARGET_GAIN_VALUES:
         print(f"   👉 Target Gain: {val}")
         
@@ -715,8 +704,7 @@ def run_exposure_test(page: Page, camera_ip: str):
     #             failed_count += 1
     #     else: failed_count += 1
 
-    # 3. Slow Shutter
-    print("\n[Step 3] Slow Shutter 설정 (Day Mode 고정)")
+    print_step(2, 3, "Slow Shutter 테스트 (Day Mode 고정)")
     
     print("\n" + "="*60)
     print("⚠️  [Action Required]")
@@ -811,8 +799,7 @@ def run_exposure_test(page: Page, camera_ip: str):
         api_set_video_exposure(page, camera_ip, payload)
         time.sleep(2)
 
-    # 4. WDR
-    print("\n[Step 4] WDR 테스트")
+    print_step(3, 3, "WDR 테스트")
     for mode in VIDEO_WDR_MODES:
         print(f"   👉 WDR: {mode}")
         
@@ -862,15 +849,12 @@ def run_exposure_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_daynight_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Day & Night Test (Auto/Schedule/ICR)")
+    print(f"🎬 [Video Test 5/10] Day & Night")
     print("=======================================================")
     
     failed_count = 0
 
-    # ---------------------------------------------------------
-    # [Step 1] Auto Mode 설정 및 센서 동작 확인
-    # ---------------------------------------------------------
-    print("\n[Step 1] Auto Mode 설정 (조도 센서 동작 확인)")
+    print_step(1, 2, "Auto Mode 테스트 (조도 센서 동작 확인)")
     
     # 1. Auto 설정
     print("   👉 설정 변경: Auto")
@@ -913,10 +897,7 @@ def run_daynight_test(page: Page, camera_ip: str):
     time.sleep(VIDEO_WAIT_TIME)
     trigger_iras_snapshot(page, camera_ip, "DayNight_Auto_Day.png") # 컬러 영상 캡처
 
-    # ---------------------------------------------------------
-    # [Step 2] Schedule Mode 테스트 (강제 주간/야간 전환)
-    # ---------------------------------------------------------
-    print("\n[Step 2] Schedule Mode 테스트")
+    print_step(2, 2, "Schedule Mode 테스트")
     
     # 1. Schedule - Always Night (강제 흑백)
     print("   👉 스케줄 설정: Always Night (B&W)")
@@ -973,21 +954,18 @@ def run_daynight_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_video_misc_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Miscellaneous Test (EIS Crop Check)")
+    print(f"🎬 [Video Test 6/10] Miscellaneous (EIS)")
     print("=======================================================")
     
     trigger_iras_snapshot(page, camera_ip, "EIS_기본값.png")
     failed_count = 0
 
-    # 초기 설정 백업
     curr_set = api_get_video_misc(page, camera_ip)
     if not curr_set: return False, "설정 조회 실패"
     
-    # 301 에러 방지 (Read-Only 제거)
     if 'returnCode' in curr_set: del curr_set['returnCode']
 
-    # EIS 모드 테스트
-    print("\n[Step 1] EIS 모드 테스트")
+    print_step(1, 1, "EIS 모드 테스트")
     
     for mode in VIDEO_EIS_MODES:
         mode_name = "Off" if mode == "off" else "On"
@@ -1031,22 +1009,18 @@ def run_video_misc_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_streaming_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Streaming Test (클라이언트 검증: Res/Codec/FPS/Bitrate)")
+    print(f"🎬 [Video Test 7/10] Streaming")
     print("=======================================================")
     
     failed_count = 0
     target_stream = VIDEO_STREAMING_TARGET_STREAM
     
-    # 초기 설정 백업
     initial_set = api_get_video_streaming(page, camera_ip)
     if not initial_set: return False, "설정 조회 실패"
     if 'returnCode' in initial_set: del initial_set['returnCode']
     
-    # ---------------------------------------------------------
-    # [Step 1] 스트림 2, 3, 4번 설정
-    # ---------------------------------------------------------
-    print("\n[Step 1] 스트림 2, 3, 4번 설정")
-    print("   ℹ️  스트림 1번은 이미 활성화되어 있으므로 건너뜀")
+    print_step(1, 5, "스트림 2, 3, 4번 설정")
+    print_action("스트림 1번은 이미 활성화되어 있으므로 건너뜀")
     
     curr_set = api_get_video_streaming(page, camera_ip)
     if not curr_set: return False, "설정 조회 실패"
@@ -1088,10 +1062,7 @@ def run_streaming_test(page: Page, camera_ip: str):
         print("   ❌ 스트림 설정 실패")
         failed_count += 1
 
-    # ---------------------------------------------------------
-    # [Step 1.5] iRAS에서 스트림 2, 3, 4번 전환 및 검증
-    # ---------------------------------------------------------
-    print("\n[Step 1.5] iRAS에서 스트림 전환 테스트")
+    print_step(2, 5, "iRAS 스트림 전환 검증")
     
     # 스트림 2, 3, 4 설정 정보
     stream_configs = {
@@ -1138,10 +1109,7 @@ def run_streaming_test(page: Page, camera_ip: str):
         print(f"   ✅ 스트림 1 복귀 완료")
         time.sleep(1)
 
-    # ---------------------------------------------------------
-    # [Step 2] 코덱 변경 확인 (H.264 <-> H.265)
-    # ---------------------------------------------------------
-    print("\n[Step 2] 코덱 변경 확인 (Stream 1)")
+    print_step(3, 5, "코덱 변경 확인 (Stream 1)")
     codecs_to_test = VIDEO_STREAMING_CODECS 
     
     for codec in codecs_to_test:
@@ -1183,10 +1151,7 @@ def run_streaming_test(page: Page, camera_ip: str):
         api_set_video_streaming(page, camera_ip, payload)
         time.sleep(2)
 
-    # ---------------------------------------------------------
-    # [Step 3] 해상도 변경 확인
-    # ---------------------------------------------------------
-    print("\n[Step 3] 해상도 변경 확인 (Stream 1)")
+    print_step(4, 5, "해상도 변경 확인 (Stream 1)")
     resolutions = ["1920x1080"]  # 1920x1080만 확인 
     
     for res in resolutions:
@@ -1225,10 +1190,7 @@ def run_streaming_test(page: Page, camera_ip: str):
         api_set_video_streaming(page, camera_ip, payload)
         time.sleep(2)
 
-    # ---------------------------------------------------------
-    # [Step 4] IPS (Framerate) 확인
-    # ---------------------------------------------------------
-    print("\n[Step 4] IPS(FPS) 확인")
+    print_step(5, 5, "IPS(FPS) 확인")
     ips_values = VIDEO_STREAMING_IPS_VALUES
     
     for ips in ips_values:
@@ -1344,13 +1306,12 @@ def run_streaming_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_video_mat_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] MAT (Motion Adaptive Transmission) Test")
+    print(f"🎬 [Video Test 8/10] MAT (Motion Adaptive Transmission)")
     print("=======================================================")
     
     trigger_iras_snapshot(page, camera_ip, "MAT_기본값.png")
     failed_count = 0
 
-    # 초기 설정 백업
     curr_set = api_get_video_mat(page, camera_ip)
     if not curr_set: return False, "설정 조회 실패"
     
@@ -1366,10 +1327,7 @@ def run_video_mat_test(page: Page, camera_ip: str):
     input(">> 준비되었으면 Enter를 누르세요...")
     print("   ▶️ MAT 테스트를 시작합니다...\n")
 
-    # ---------------------------------------------------------
-    # [Step 1] MAT Off 상태 확인 (기준점)
-    # ---------------------------------------------------------
-    print("\n[Step 1] MAT Off (기준 프레임레이트 확인)")
+    print_step(1, 2, "MAT Off (기준 프레임레이트 확인)")
     
     payload = curr_set.copy()
     payload['useMat'] = 'off'
@@ -1395,10 +1353,7 @@ def run_video_mat_test(page: Page, camera_ip: str):
     
     # Step 1은 이미 off 상태이므로 복구 불필요
 
-    # ---------------------------------------------------------
-    # [Step 2] MAT On - IPS 감소 확인
-    # ---------------------------------------------------------
-    print("\n[Step 2] MAT On (프레임레이트 감소 확인)")
+    print_step(2, 2, "MAT On (프레임레이트 감소 확인)")
     print(f"   ℹ️  설정: sensitivity={VIDEO_MAT_SENSITIVITY}, inactivityPeriod={VIDEO_MAT_INACTIVITY_PERIOD}, framerateStream1={VIDEO_MAT_TARGET_FRAMERATE}")
     
     payload['useMat'] = 'on'
@@ -1464,30 +1419,24 @@ def run_video_mat_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_privacy_mask_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] Privacy Mask Test ({VIDEO_PRIVACY_ZONE_COUNT} Zones)")
+    print(f"🎬 [Video Test 9/10] Privacy Mask")
     print("=======================================================")
     
     trigger_iras_snapshot(page, camera_ip, "Privacy_기본값.png")
     failed_count = 0
 
-    # 초기 설정 백업
     curr_set = api_get_video_privacy(page, camera_ip)
     if not curr_set:
-        print(f"   ❌ [Privacy Mask] API 조회 실패: videoPrivacy")
-        print(f"   ℹ️  카메라 IP: {camera_ip}")
-        return False, "설정 조회 실패 (videoPrivacy API 응답 없음)"
+        print_error("API 조회 실패: videoPrivacy")
+        return False, "설정 조회 실패"
     
     if 'returnCode' in curr_set: del curr_set['returnCode']
     
-    # maxWidth, maxHeight 확인
     max_width = int(curr_set.get('maxWidth', 80))
     max_height = int(curr_set.get('maxHeight', 45))
     print(f"   ℹ️  좌표 시스템: {max_width} x {max_height}")
 
-    # ---------------------------------------------------------
-    # [Step 1] Privacy Mask Off 상태 확인
-    # ---------------------------------------------------------
-    print("\n[Step 1] Privacy Mask Off (초기 상태)")
+    print_step(1, 2, "Privacy Mask Off (초기 상태)")
     
     payload = curr_set.copy()
     payload['usePrivacy'] = 'off'
@@ -1505,10 +1454,7 @@ def run_privacy_mask_test(page: Page, camera_ip: str):
         print(f"   ❌ 설정 실패")
         failed_count += 1
 
-    # ---------------------------------------------------------
-    # [Step 2] Privacy Zone 그리기
-    # ---------------------------------------------------------
-    print(f"\n[Step 2] {VIDEO_PRIVACY_ZONE_COUNT}개 Privacy Zone 생성")
+    print_step(2, 2, f"{VIDEO_PRIVACY_ZONE_COUNT}개 Privacy Zone 생성")
     print(f"   ℹ️  그리드: {VIDEO_PRIVACY_GRID_ROWS}x{VIDEO_PRIVACY_GRID_COLS}")
     
     # 화면을 그리드로 나눠서 각각 다른 위치에 마스크 배치
@@ -1583,29 +1529,22 @@ def run_privacy_mask_test(page: Page, camera_ip: str):
 # ===========================================================
 def run_osd_test(page: Page, camera_ip: str):
     print("\n=======================================================")
-    print(f"🎬 [Video] OSD (On-Screen Display) Test")
+    print(f"🎬 [Video Test 10/10] OSD (On-Screen Display)")
     print("=======================================================")
     
     trigger_iras_snapshot(page, camera_ip, "OSD_기본값.png")
     failed_count = 0
 
-    # =========================================================
-    # Part A: OSD Text Test
-    # =========================================================
     print("\n" + "="*60)
     print("📝 [Part A] OSD Text Test")
     print("="*60)
     
-    # 초기 설정 백업
     curr_text_set = api_get_video_osd_text(page, camera_ip)
     if not curr_text_set: return False, "OSD Text 설정 조회 실패"
     
     if 'returnCode' in curr_text_set: del curr_text_set['returnCode']
 
-    # ---------------------------------------------------------
-    # [Step A1] OSD Text Off 상태
-    # ---------------------------------------------------------
-    print("\n[Step A1] OSD Text Off")
+    print_step(1, 2, "OSD Text Off")
     
     payload = curr_text_set.copy()
     payload['useOsd'] = 'off'
@@ -1625,10 +1564,7 @@ def run_osd_test(page: Page, camera_ip: str):
         print(f"   ❌ 설정 실패")
         failed_count += 1
 
-    # ---------------------------------------------------------
-    # [Step A2] OSD Text On - 속성 테스트
-    # ---------------------------------------------------------
-    print(f"\n[Step A2] OSD Text On: '{VIDEO_OSD_TEXT_STRING}'")
+    print_step(2, 2, f"OSD Text On: '{VIDEO_OSD_TEXT_STRING}'")
     
     payload = curr_text_set.copy()
     payload['useOsd'] = 'on'
@@ -1722,23 +1658,16 @@ def run_osd_test(page: Page, camera_ip: str):
         else:
             print("   ⚠️ 설정 복구 실패")
 
-    # =========================================================
-    # Part B: OSD DateTime Test
-    # =========================================================
     print("\n" + "="*60)
     print("📅 [Part B] OSD DateTime Test")
     print("="*60)
     
-    # 초기 설정 백업
     curr_datetime_set = api_get_video_osd_datetime(page, camera_ip)
     if not curr_datetime_set: return False, "OSD DateTime 설정 조회 실패"
     
     if 'returnCode' in curr_datetime_set: del curr_datetime_set['returnCode']
 
-    # ---------------------------------------------------------
-    # [Step B1] OSD DateTime Off 상태
-    # ---------------------------------------------------------
-    print("\n[Step B1] OSD DateTime Off")
+    print_step(1, 2, "OSD DateTime Off")
     
     payload = curr_datetime_set.copy()
     payload['useOsd'] = 'off'
@@ -1758,10 +1687,7 @@ def run_osd_test(page: Page, camera_ip: str):
         print(f"   ❌ 설정 실패")
         failed_count += 1
 
-    # ---------------------------------------------------------
-    # [Step B2] OSD DateTime On - 형식 테스트
-    # ---------------------------------------------------------
-    print(f"\n[Step B2] OSD DateTime On")
+    print_step(2, 2, "OSD DateTime On")
     
     payload = curr_datetime_set.copy()
     payload['useOsd'] = 'on'
