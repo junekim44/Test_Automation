@@ -7,9 +7,9 @@ from config import (
     TEST_GROUP_A,
     TEST_GROUP_B,
     TEST_USER_ID,
-    TEST_USER_PW,
-    IRAS_DEVICE_NAME
+    TEST_USER_PW
 )
+import config  # IRAS_DEVICE_NAME을 동적으로 참조하기 위해
 import iRAS_test
 
 # ===========================================================
@@ -372,7 +372,7 @@ def run_user_group_test(page: Page, camera_ip: str, admin_id: str, admin_pw: str
     GROUP_B = TEST_GROUP_B
     UID = TEST_USER_ID
     UPW = TEST_USER_PW
-    DEVICE = IRAS_DEVICE_NAME
+    DEVICE = config.IRAS_DEVICE_NAME  # 실행 시점에 config에서 동적으로 가져옴
     TOTAL_STEPS = 6
 
     # API 클라이언트 생성
