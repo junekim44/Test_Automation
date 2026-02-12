@@ -380,7 +380,7 @@ class IRASController:
             self._click_relative(*IRAS_COORDS["menu_alarm"])
             time.sleep(IRAS_DELAYS["menu_navigate"])
             self._click_relative(*IRAS_COORDS["alarm_on"])
-            self._handle_permission_action("menu_alarm", wait_time=0)
+            self._handle_permission_action("menu_alarm")
 
         print_action("클립 카피 차단 테스트 중...")
         if self._right_click_surveillance(main_hwnd):
