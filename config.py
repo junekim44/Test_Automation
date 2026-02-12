@@ -102,7 +102,7 @@ IRAS_COORDS = {
     "multi_stream_2": (150, 50),    # 멀티 스트림 2 제어
     "multi_stream_3": (150, 75),    # 멀티 스트림 3 제어
     "multi_stream_4": (150, 100),    # 멀티 스트림 4 제어    
-    "alarm_on": (150, 0),           # 알람 > 켜기 (상대좌표)
+    "alarm_on": (170, 0),           # 알람 > 켜기 (상대좌표)
     "clip_copy": (30, 0),           # 클립 복사 메뉴
 }
 
@@ -140,7 +140,8 @@ IRAS_DELAYS = {
 
 # iRAS 감시 화면 클릭 오프셋
 IRAS_SURVEILLANCE_OFFSETS = {
-    "right_click_top": 15,         # 우클릭 상단 오프셋         # 우클릭 중간 오프셋
+    "right_click_top": 15,         # 우클릭 상단 오프셋         
+    # "right_click_mid": 200,        # 우클릭 중간 오프셋
     "device_list": 25,             # 장치 리스트 클릭 오프셋
 }
 
